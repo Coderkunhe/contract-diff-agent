@@ -7,8 +7,8 @@ import json
 import re
 from datetime import datetime, timezone
 
-from openai import OpenAI
 from json_repair import repair_json
+from .model_pool import AutoFallbackClient
 
 from .pdf_extractor import ContractDocument, estimate_tokens
 
@@ -208,23 +208,22 @@ def run_llm_diff(
 ) -> dict:
     """Run semantic contract comparison using GMI proxy -> Claude."""
 
-    client = OpenAI(api_key=api_key, base_url=base_url, timeout=300.0)
+    client = AutoFallbackClient(api_key=api_key, base_url=base_url,
+                                primary_model=model, timeout=300.0)
 
     system_prompt = _build_system_prompt()
     user_prompt = _build_user_prompt(v1.full_text, v2.full_text)
 
     input_tokens = estimate_tokens(v1.full_text) + estimate_tokens(v2.full_text)
-    print(f"  模型: {model}")
+    print(f"  模型池: {model} (自动切换)")
     print(f"  输入 tokens 估算: ~{input_tokens:,}")
 
-    response = client.chat.completions.create(
-        model=model,
+    response = client.create(
         max_tokens=max_tokens,
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ],
-        timeout=300,
         stream=True,
         response_format={"type": "json_object"},
     )

@@ -7,9 +7,8 @@ import json
 import os
 from typing import Any
 
-from openai import OpenAI
 from json_repair import repair_json
-
+from .model_pool import AutoFallbackClient
 from .pdf_extractor import estimate_tokens
 
 RISK_CATEGORIES = [
@@ -77,7 +76,8 @@ def classify_changes(
     if not changes:
         return []
 
-    client = OpenAI(api_key=api_key, base_url=base_url, timeout=300)
+    client = AutoFallbackClient(api_key=api_key, base_url=base_url,
+                                primary_model=model, timeout=300.0)
 
     cat_lines = "\n".join(
         f"- {c['id']}: {c['name']}（关注：{c['focus']}）"
@@ -109,14 +109,12 @@ def classify_changes(
         user_prompt = f"风险分类以下合同差异:\n{json.dumps(changes_json, ensure_ascii=False)}"
 
         try:
-            response = client.chat.completions.create(
-                model=model,
+            response = client.create(
                 max_tokens=2500,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
-                timeout=300,
                 stream=True,
                 response_format={"type": "json_object"},
             )

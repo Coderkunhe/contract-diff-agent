@@ -10,13 +10,13 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
-from openai import OpenAI
 from json_repair import repair_json
 
 from .clause_aligner import DiffMap, AlignedPair
 from .clause_tree import ClauseNode
 from .pdf_extractor import estimate_tokens
 from .risk_classifier import RISK_CATEGORIES
+from .model_pool import AutoFallbackClient
 
 _MAX_WORKERS = 5
 _COUNTER_LOCK = threading.Lock()
@@ -124,8 +124,7 @@ def _prefilter(pair: AlignedPair) -> list[dict] | None:
 
 def _diff_single(
     pair: AlignedPair,
-    client: OpenAI,
-    model: str,
+    client: AutoFallbackClient,
     max_tokens: int,
     system_prompt: str,
     pair_index: int,
@@ -146,14 +145,12 @@ def _diff_single(
     title, user_prompt = prompt_info
 
     try:
-        response = client.chat.completions.create(
-            model=model,
+        response = client.create(
             max_tokens=max_tokens,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            timeout=300,
             stream=True,
             response_format={"type": "json_object"},
         )
@@ -286,14 +283,15 @@ def identify_changes(
     if not tasks:
         return all_changes, frequency
 
-    # Parallel execution
-    client = OpenAI(api_key=api_key, base_url=base_url, timeout=300)
+    # Parallel execution with auto-fallback across models
+    client = AutoFallbackClient(api_key=api_key, base_url=base_url,
+                                primary_model=model, timeout=300.0)
     completed = 0
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {
             executor.submit(
-                _diff_single, pair, client, model, max_tokens, system_prompt, i, total
+                _diff_single, pair, client, max_tokens, system_prompt, i, total
             ): (i, pair)
             for i, pair in enumerate(tasks, 1)
         }

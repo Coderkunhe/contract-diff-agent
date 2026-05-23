@@ -11,8 +11,8 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
-from openai import OpenAI
 from json_repair import repair_json
+from .model_pool import AutoFallbackClient
 
 _VALIDATE_MAX_WORKERS = 8
 
@@ -75,14 +75,15 @@ def validate_changes(
         return changes
 
     print(f"  L3 语义校验 ({len(llm_changes)} 条, {max_workers} 路并行)...")
-    client = OpenAI(api_key=api_key, base_url=base_url, timeout=300)
+    client = AutoFallbackClient(api_key=api_key, base_url=base_url,
+                                primary_model=model, timeout=300.0)
     stats_lock = threading.Lock()
     stats = {"confirmed": 0, "rejected": 0, "uncertain": 0}
     completed = 0
 
     def _validate_one(idx: int, change: dict) -> tuple[int, dict]:
         result = _l3_validate(change, v1_full_text, v2_full_text,
-                              client, model, max_retries)
+                              client, max_retries)
         return idx, result
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -175,8 +176,7 @@ def _l3_validate(
     change: dict,
     v1_text: str,
     v2_text: str,
-    client: OpenAI,
-    model: str,
+    client: AutoFallbackClient,
     max_retries: int,
 ) -> dict:
     """LLM semantic validation with retry loop."""
@@ -192,14 +192,12 @@ def _l3_validate(
 
     for attempt in range(1, max_retries + 1):
         try:
-            response = client.chat.completions.create(
-                model=model,
+            response = client.create(
                 max_tokens=500,
                 messages=[
                     {"role": "system", "content": VALIDATOR_SYSTEM},
                     {"role": "user", "content": prompt},
                 ],
-                timeout=120,
                 stream=True,
                 response_format={"type": "json_object"},
             )
