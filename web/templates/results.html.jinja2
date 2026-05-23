@@ -285,8 +285,9 @@ function resultsPage() {
 
     downloadReport() {
       const jobId = window.location.pathname.split('/').pop();
-      const ids = this.confirmed.join(',');
-      const url = '/api/results/' + jobId + '/pdf?ids=' + encodeURIComponent(ids);
+      const ids = Alpine.store('confirmSet').filter(Boolean);
+      if (!ids.length) return;
+      const url = '/api/results/' + jobId + '/pdf?ids=' + ids.join(',');
       window.open(url, '_blank');
     },
   }

@@ -480,6 +480,13 @@ def results_page(job_id: str, request: Request):
 
 @app.get("/api/results/{job_id}/pdf")
 def results_pdf(job_id: str, ids: str = ""):
+    try:
+        return _generate_pdf(job_id, ids)
+    except Exception as e:
+        return JSONResponse({"error": f"PDF 生成失败: {str(e)[:200]}"}, status_code=500)
+
+
+def _generate_pdf(job_id: str, ids: str):
     """Generate a PDF report of (confirmed) changes."""
     with _JOBS_LOCK:
         job = _JOBS.get(job_id)
@@ -501,7 +508,24 @@ def results_pdf(job_id: str, ids: str = ""):
     from fpdf import FPDF
 
     pdf = FPDF()
-    pdf.add_font("CJK", "", "/System/Library/Fonts/PingFang.ttc", uni=True)
+    # Try PingFang first (macOS), fall back to any available CJK font
+    font_paths = [
+        "/System/Library/Fonts/PingFang.ttc",
+        "/System/Library/Fonts/STHeiti Light.ttc",
+        "/System/Library/Fonts/Hiragino Sans GB.ttc",
+    ]
+    font_loaded = False
+    for fp in font_paths:
+        if os.path.exists(fp):
+            try:
+                pdf.add_font("CJK", "", fp, uni=True)
+                font_loaded = True
+                break
+            except Exception:
+                continue
+    if not font_loaded:
+        return JSONResponse({"error": "PDF 生成失败: 未找到中文字体"}, status_code=500)
+
     pdf.add_page()
 
     # Title
