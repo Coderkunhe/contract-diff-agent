@@ -1,7 +1,4 @@
-"""Dynamic model pool with fallback — auto-switches on failure.
-
-Priority: Claude (structured output king) → Chinese-native → Global fallbacks.
-"""
+"""Dynamic model pool with fallback — auto-switches models AND providers."""
 
 import os
 import time
@@ -9,28 +6,50 @@ from dataclasses import dataclass, field
 from typing import Any
 
 # ── Model priority tiers ──────────────────────────────────────────
-# Tier 1: Claude — best at structured JSON + legal reasoning
-# Tier 2: Chinese-native — excellent Chinese quality
-# Tier 3: Global strong — reliable all-rounders
-# Tier 4: Fast/cheap — last resort
+# Each model has an optional "provider" field. If not set, uses the default
+# GMI proxy. Different providers can have different API keys and base URLs.
 
 MODEL_POOL: list[dict[str, Any]] = [
-    # Tier 1: Claude
-    {"id": "anthropic/claude-sonnet-4.6", "tier": 1, "label": "Claude Sonnet 4.6", "tags": ["claude", "primary"]},
-    {"id": "anthropic/claude-opus-4.7", "tier": 1, "label": "Claude Opus 4.7", "tags": ["claude", "best"]},
-    {"id": "anthropic/claude-sonnet-4.5", "tier": 1, "label": "Claude Sonnet 4.5", "tags": ["claude"]},
-    {"id": "anthropic/claude-opus-4.6", "tier": 1, "label": "Claude Opus 4.6", "tags": ["claude"]},
-    # Tier 2: Chinese-native
-    {"id": "Qwen/Qwen3.7-Max", "tier": 2, "label": "Qwen 3.7 Max", "tags": ["chinese", "quality"]},
-    {"id": "deepseek-ai/DeepSeek-V4-Pro", "tier": 2, "label": "DeepSeek V4 Pro", "tags": ["chinese", "reasoning"]},
-    {"id": "zai-org/GLM-5.1-FP8", "tier": 2, "label": "GLM 5.1", "tags": ["chinese"]},
-    # Tier 3: Global
-    {"id": "openai/gpt-5.4", "tier": 3, "label": "GPT 5.4", "tags": ["global"]},
-    {"id": "anthropic/claude-haiku-4.5", "tier": 3, "label": "Claude Haiku 4.5", "tags": ["claude", "fast"]},
-    # Tier 4: Fallback
-    {"id": "deepseek-ai/DeepSeek-V3.2", "tier": 4, "label": "DeepSeek V3.2", "tags": ["fallback"]},
-    {"id": "openai/gpt-4o", "tier": 4, "label": "GPT-4o", "tags": ["fallback"]},
+    # Tier 1: Claude via GMI
+    {"id": "anthropic/claude-sonnet-4.6", "tier": 1, "label": "Claude Sonnet 4.6",
+     "provider": "gmi", "tags": ["claude", "primary"]},
+    {"id": "anthropic/claude-opus-4.7", "tier": 1, "label": "Claude Opus 4.7",
+     "provider": "gmi", "tags": ["claude", "best"]},
+    # Tier 1: DeepSeek direct API (Chinese-native, strong reasoning)
+    {"id": "deepseek-chat", "tier": 1, "label": "DeepSeek V3",
+     "provider": "deepseek", "tags": ["chinese", "reasoning", "primary"]},
+    {"id": "deepseek-reasoner", "tier": 1, "label": "DeepSeek R1",
+     "provider": "deepseek", "tags": ["chinese", "reasoning", "best"]},
+    # Tier 2: GMI fallbacks
+    {"id": "anthropic/claude-sonnet-4.5", "tier": 2, "label": "Claude Sonnet 4.5",
+     "provider": "gmi", "tags": ["claude"]},
+    {"id": "Qwen/Qwen3.7-Max", "tier": 2, "label": "Qwen 3.7 Max",
+     "provider": "gmi", "tags": ["chinese", "quality"]},
+    # Tier 3
+    {"id": "anthropic/claude-opus-4.6", "tier": 3, "label": "Claude Opus 4.6",
+     "provider": "gmi", "tags": ["claude"]},
+    {"id": "openai/gpt-5.4", "tier": 3, "label": "GPT 5.4",
+     "provider": "gmi", "tags": ["global"]},
+    # Tier 4: Fast/fallback
+    {"id": "anthropic/claude-haiku-4.5", "tier": 4, "label": "Claude Haiku 4.5",
+     "provider": "gmi", "tags": ["claude", "fast"]},
+    {"id": "openai/gpt-4o", "tier": 4, "label": "GPT-4o",
+     "provider": "gmi", "tags": ["fallback"]},
 ]
+
+# ── Provider configs ──────────────────────────────────────────────
+PROVIDER_CONFIGS = {
+    "gmi": {
+        "api_key_env": "ANTHROPIC_API_KEY",
+        "base_url_env": "GMI_BASE_URL",
+        "default_base_url": "https://api.gmi-serving.com/v1",
+    },
+    "deepseek": {
+        "api_key_env": "DEEPSEEK_API_KEY",
+        "base_url_env": "DEEPSEEK_BASE_URL",
+        "default_base_url": "https://api.deepseek.com/v1",
+    },
+}
 
 
 def get_primary_model() -> str:
@@ -130,38 +149,66 @@ from openai import OpenAI
 
 
 class AutoFallbackClient:
-    """OpenAI-compatible client that auto-switches models on failure."""
+    """OpenAI-compatible client that auto-switches models AND providers on failure.
 
-    def __init__(self, api_key: str, base_url: str, primary_model: str | None = None,
-                 timeout: float = 300.0):
-        self._client = OpenAI(api_key=api_key, base_url=base_url, timeout=timeout)
+    Supports multiple API providers (GMI, DeepSeek, etc.) each with
+    their own API key and base URL.
+    """
+
+    def __init__(self, primary_model: str | None = None, timeout: float = 300.0):
         self._pool = get_model_pool(primary_model)
         self._used_model: str | None = None
+        self._used_provider: str | None = None
+        self._timeout = timeout
+        self._clients: dict[str, OpenAI] = {}
+
+    def _get_client(self, provider: str) -> OpenAI:
+        """Get or create an OpenAI client for a provider."""
+        if provider not in self._clients:
+            cfg = PROVIDER_CONFIGS.get(provider, PROVIDER_CONFIGS["gmi"])
+            api_key = os.environ.get(cfg["api_key_env"], "")
+            base_url = os.environ.get(cfg["base_url_env"], cfg["default_base_url"])
+            if not api_key:
+                raise RuntimeError(
+                    f"Provider '{provider}' 的 API Key 未设置 "
+                    f"(环境变量: {cfg['api_key_env']})"
+                )
+            self._clients[provider] = OpenAI(
+                api_key=api_key, base_url=base_url, timeout=self._timeout,
+            )
+        return self._clients[provider]
 
     @property
     def used_model(self) -> str | None:
         """The model that succeeded in the last call."""
         return self._used_model
 
-    def create(self, **kwargs) -> Any:
-        """Call the API with auto-fallback across models.
+    @property
+    def used_provider(self) -> str | None:
+        """The provider that succeeded in the last call."""
+        return self._used_provider
 
-        Accepts the same kwargs as openai.chat.completions.create,
-        but 'model' is overridden by the pool's fallback logic.
-        """
-        kwargs.pop("model", None)  # We manage model selection
+    def create(self, **kwargs) -> Any:
+        """Call the API with auto-fallback across models and providers."""
+        kwargs.pop("model", None)
         last_error = None
 
         for attempt, model_id in enumerate(self._pool):
             if not is_model_available(model_id):
                 continue
 
+            # Find this model's provider
+            model_info = next((m for m in MODEL_POOL if m["id"] == model_id), None)
+            provider = model_info["provider"] if model_info else "gmi"
+
             try:
-                response = self._client.chat.completions.create(
+                client = self._get_client(provider)
+                response = client.chat.completions.create(
                     model=model_id, **kwargs,
                 )
                 mark_model_success(model_id)
                 self._used_model = model_id
+                self._used_provider = provider
                 return response
             except Exception as e:
                 last_error = e

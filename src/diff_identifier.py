@@ -292,9 +292,8 @@ def identify_changes(
     if not tasks:
         return all_changes, frequency
 
-    # Parallel execution with auto-fallback across models
-    client = AutoFallbackClient(api_key=api_key, base_url=base_url,
-                                primary_model=model, timeout=300.0)
+    # Parallel execution with auto-fallback across models/providers
+    client = AutoFallbackClient(primary_model=model, timeout=300.0)
     completed = 0
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:

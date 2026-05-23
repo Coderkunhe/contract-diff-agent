@@ -76,8 +76,7 @@ def classify_changes(
     if not changes:
         return []
 
-    client = AutoFallbackClient(api_key=api_key, base_url=base_url,
-                                primary_model=model, timeout=300.0)
+    client = AutoFallbackClient(primary_model=model, timeout=300.0)
 
     cat_lines = "\n".join(
         f"- {c['id']}: {c['name']}（关注：{c['focus']}）"

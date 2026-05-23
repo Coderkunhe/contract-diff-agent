@@ -75,8 +75,7 @@ def validate_changes(
         return changes
 
     print(f"  L3 语义校验 ({len(llm_changes)} 条, {max_workers} 路并行)...")
-    client = AutoFallbackClient(api_key=api_key, base_url=base_url,
-                                primary_model=model, timeout=300.0)
+    client = AutoFallbackClient(primary_model=model, timeout=300.0)
     stats_lock = threading.Lock()
     stats = {"confirmed": 0, "rejected": 0, "uncertain": 0}
     completed = 0

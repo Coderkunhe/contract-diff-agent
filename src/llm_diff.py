@@ -208,8 +208,7 @@ def run_llm_diff(
 ) -> dict:
     """Run semantic contract comparison using GMI proxy -> Claude."""
 
-    client = AutoFallbackClient(api_key=api_key, base_url=base_url,
-                                primary_model=model, timeout=300.0)
+    client = AutoFallbackClient(primary_model=model, timeout=300.0)
 
     system_prompt = _build_system_prompt()
     user_prompt = _build_user_prompt(v1.full_text, v2.full_text)
