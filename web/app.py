@@ -211,18 +211,23 @@ def _run_pipeline(job_id: str, v1_path: str, v2_path: str, keep_english: bool):
 
     try:
         now = datetime.now(timezone.utc)
-        _update_job_inner(job_id, status="extracting", progress=5,
-                          message="正在提取 PDF 文本...", timestamp=now)
-        _send_event(job_id, "progress", {"status": "extracting", "step": "提取 PDF 文本",
-                      "progress": 5, "message": "正在提取 PDF 文本..."})
+        _update_job_inner(job_id, status="extracting", progress=3,
+                          message="正在提取 V1 PDF 文本...", timestamp=now)
+        _send_event(job_id, "progress", {"status": "extracting", "step": "解析 V1 文档",
+                      "progress": 3, "message": "正在提取 V1 合同文本..."})
 
         v1 = extract_contract(v1_path, keep_english=keep_english)
+        _send_event(job_id, "progress", {"status": "extracting", "step": "解析 V2 文档",
+                      "progress": 6, "message": f"V1: {v1.total_pages} 页, 正在提取 V2..."})
+
         v2 = extract_contract(v2_path, keep_english=keep_english)
+        _send_event(job_id, "progress", {"status": "extracting", "step": "文档解析完成",
+                      "progress": 9, "message": f"V1: {v1.total_pages} 页, V2: {v2.total_pages} 页"})
 
         fake_args = argparse.Namespace(validate=False)
 
         _send_event(job_id, "progress", {"status": "tree_building", "step": "构建条款树",
-                      "progress": 10, "message": "构建条款树..."})
+                      "progress": 12, "message": "正在解析合同条款结构..."})
 
         # Capture stdout for progress tracking
         tracker = JobProgressIO(job_id, sys.stdout)

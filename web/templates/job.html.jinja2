@@ -5,21 +5,27 @@
   <!-- Circular progress -->
   <div class="bg-white rounded-2xl border border-slate-200 p-8 mb-6 sticky top-[72px] z-30 backdrop-blur-sm bg-white/95">
     <div class="flex flex-col items-center">
-      <!-- SVG Ring -->
-      <div class="relative w-44 h-44 mb-5">
-        <svg class="w-full h-full -rotate-90" viewBox="0 0 120 120">
-          <circle cx="60" cy="60" r="52" fill="none" stroke="#f1f5f9" stroke-width="8"/>
-          <circle cx="60" cy="60" r="52" fill="none"
-                  :stroke="status === 'done' ? '#10b981' : '#4c6ef5'"
-                  stroke-width="8" stroke-linecap="round"
-                  :stroke-dasharray="2 * 3.14159 * 52"
-                  :stroke-dashoffset="2 * 3.14159 * 52 * (1 - Math.max(progress, 2) / 100)"
+      <!-- SVG Ring - large -->
+      <div class="relative w-56 h-56 mb-6">
+        <svg class="w-full h-full -rotate-90" viewBox="0 0 160 160">
+          <circle cx="80" cy="80" r="70" fill="none" stroke="#f1f5f9" stroke-width="10"/>
+          <circle cx="80" cy="80" r="70" fill="none"
+                  :stroke="status === 'done' ? '#10b981' : 'url(#grad)'"
+                  stroke-width="10" stroke-linecap="round"
+                  :stroke-dasharray="2 * 3.14159 * 70"
+                  :stroke-dashoffset="2 * 3.14159 * 70 * (1 - Math.max(progress, 2) / 100)"
                   class="transition-all duration-700 ease-out"/>
+          <defs>
+            <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%" stop-color="#4c6ef5"/>
+              <stop offset="100%" stop-color="#748ffc"/>
+            </linearGradient>
+          </defs>
         </svg>
         <div class="absolute inset-0 flex flex-col items-center justify-center">
-          <span class="text-4xl font-bold" :class="status === 'done' ? 'text-emerald-600' : 'text-slate-800'"
+          <span class="text-5xl font-bold" :class="status === 'done' ? 'text-emerald-600' : 'text-slate-800'"
                 x-text="status === 'done' ? '✓' : Math.round(progress) + '%'">0%</span>
-          <span class="text-xs text-slate-400 mt-1" x-text="stepLabel">准备中</span>
+          <span class="text-sm text-slate-400 mt-2 font-medium" x-text="stepLabel">准备中</span>
         </div>
       </div>
 
