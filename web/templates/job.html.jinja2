@@ -5,7 +5,7 @@
   <!-- Circular progress -->
   <div class="bg-white rounded-2xl border border-slate-200 p-8 mb-6 sticky top-14 z-40 shadow-md">
     <div class="flex flex-col items-center">
-      <!-- SVG Ring - large -->
+      <!-- SVG Ring -->
       <div class="relative w-56 h-56 mb-6">
         <svg class="w-full h-full -rotate-90" viewBox="0 0 160 160">
           <circle cx="80" cy="80" r="70" fill="none" stroke="#f1f5f9" stroke-width="10"/>
@@ -13,8 +13,8 @@
                   :stroke="status === 'done' ? '#10b981' : 'url(#grad)'"
                   stroke-width="10" stroke-linecap="round"
                   :stroke-dasharray="2 * 3.14159 * 70"
-                  :stroke-dashoffset="2 * 3.14159 * 70 * (1 - Math.max(progress, 2) / 100)"
-                  class="transition-all duration-700 ease-out"/>
+                  :stroke-dashoffset="2 * 3.14159 * 70 * (1 - Math.max(stagePct, 2) / 100)"
+                  class="transition-all duration-500 ease-out"/>
           <defs>
             <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="0%">
               <stop offset="0%" stop-color="#4c6ef5"/>
@@ -23,15 +23,16 @@
           </defs>
         </svg>
         <div class="absolute inset-0 flex flex-col items-center justify-center">
-          <span class="text-5xl font-bold" :class="status === 'done' ? 'text-emerald-600' : 'text-slate-800'"
-                x-text="status === 'done' ? '✓' : Math.round(progress) + '%'">0%</span>
-          <span class="text-sm text-slate-400 mt-2 font-medium" x-text="stepLabel">准备中</span>
+          <span class="text-4xl font-bold" :class="status === 'done' ? 'text-emerald-600' : 'text-slate-800'"
+                x-text="status === 'done' ? '✓' : stagePct + '%'">0%</span>
+          <span class="text-xs text-slate-400 mt-1 font-medium" x-text="stepLabel">准备中</span>
         </div>
       </div>
 
-      <!-- Stage text -->
+      <!-- Stage detail -->
       <div class="text-center mb-4">
         <p class="text-sm text-slate-500" x-text="message || '正在连接...'">正在连接...</p>
+        <p class="text-xs text-slate-400 mt-1" x-show="stageDetail" x-text="stageDetail"></p>
       </div>
 
       <!-- Live stats -->
@@ -111,7 +112,7 @@
             <div class="flex items-center gap-2 text-[10px] text-slate-400 flex-wrap">
               <span x-show="change.clause_ref_v2" x-text="change.clause_ref_v2"></span>
               <template x-for="cat in change.risk_categories" :key="cat">
-                <span class="bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded">{{ cat }}</span>
+                <span class="bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded" x-text="cat"></span>
               </template>
               <span x-show="change.attention_for" x-text="'👤 ' + change.attention_for"></span>
             </div>
@@ -138,11 +139,16 @@
 
 <script>
 function streamer(jobId) {
+  const stageIds = ['extracting', 'tree_building', 'aligning', 'identifying', 'classifying'];
   return {
     jobId: jobId,
     status: 'connecting',
     progress: 0,
+    stagePct: 0,
+    prevStage: '',
     stepLabel: '连接中...',
+    message: '正在连接...',
+    stageDetail: '',
     changes: [],
     changeCount: 0,
     highCount: 0,
@@ -150,6 +156,7 @@ function streamer(jobId) {
     errorMsg: '',
     _es: null,
     _timer: null,
+    _stageTimer: null,
 
     get statText() {
       if (this.status === 'done') return '✅ 完成';
@@ -158,7 +165,6 @@ function streamer(jobId) {
 
     init() {
       this._timer = setInterval(() => { this.elapsed++; }, 1000);
-      // Fetch initial state immediately before SSE connects
       fetch('/api/jobs/' + jobId)
         .then(r => r.json())
         .then(d => {
@@ -179,6 +185,14 @@ function streamer(jobId) {
         this.progress = d.progress || this.progress;
         this.stepLabel = d.step || this.stepLabel;
         this.message = d.message || this.message;
+        // Stage-specific progress: reset to 0 when stage changes
+        if (d.status && d.status !== this.prevStage) {
+          this.stagePct = 0;
+          this.prevStage = d.status;
+          this._startStageAnim(d.status);
+        }
+        // If sub-progress info available
+        if (d.detail) this.stageDetail = d.detail;
       });
 
       this._es.addEventListener('change', (e) => {
@@ -195,8 +209,10 @@ function streamer(jobId) {
 
       this._es.addEventListener('done', (e) => {
         this.status = 'done';
+        this.stagePct = 100;
         this.progress = 100;
         this.stepLabel = '比对完成';
+        this.message = '全部完成';
         this._es.close();
         clearInterval(this._timer);
       });
@@ -217,6 +233,34 @@ function streamer(jobId) {
           clearInterval(this._timer);
         }
       };
+    },
+
+    _startStageAnim(stage) {
+      // Fast stages: animate smoothly to 100%
+      const fastStages = ['extracting', 'tree_building', 'aligning'];
+      const slowStages = ['identifying', 'validating', 'classifying'];
+      clearInterval(this._stageTimer);
+      if (fastStages.includes(stage)) {
+        let p = 0;
+        this._stageTimer = setInterval(() => {
+          p += 15;
+          if (p >= 95) { p = 95; clearInterval(this._stageTimer); }
+          this.stagePct = p;
+        }, 200);
+      } else if (slowStages.includes(stage)) {
+        let p = 0;
+        this._stageTimer = setInterval(() => {
+          p += 3;
+          if (p >= 90) { clearInterval(this._stageTimer); }
+          this.stagePct = Math.min(p, 90);
+        }, 1500);
+      }
+    },
+
+    formatElapsed(s) {
+      const m = Math.floor(s / 60);
+      const sec = s % 60;
+      return String(m).padStart(2,'0') + ':' + String(sec).padStart(2,'0');
     }
   }
 }
