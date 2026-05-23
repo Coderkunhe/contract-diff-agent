@@ -6,6 +6,7 @@ Usage:
 """
 
 import argparse
+import atexit
 import io
 import json
 import os
@@ -41,7 +42,15 @@ config = AppConfig.from_env()
 _LLM_ENABLED = bool(config.api_key)
 
 # ── Thread pool ───────────────────────────────────────────────────
-_executor = ThreadPoolExecutor(max_workers=2)
+_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="diffworker")
+
+
+def _shutdown_executor():
+    """Shutdown thread pool gracefully on exit."""
+    _executor.shutdown(wait=False, cancel_futures=True)
+
+
+atexit.register(_shutdown_executor)
 
 # ── Job store ─────────────────────────────────────────────────────
 _JOBS: dict[str, dict] = {}
@@ -256,6 +265,12 @@ def _render(name: str, **ctx) -> HTMLResponse:
 
 
 # ── Routes ───────────────────────────────────────────────────────
+@app.get("/health")
+def health():
+    """Quick health check — no template rendering."""
+    return {"status": "ok", "workers": _executor._max_workers}
+
+
 @app.get("/", response_class=HTMLResponse)
 def upload_page():
     return _render("upload.html.jinja2", llm_enabled=_LLM_ENABLED)
@@ -280,7 +295,6 @@ async def upload_files(v1_file: UploadFile = File(...), v2_file: UploadFile = Fi
     upload_dir = _PROJECT_ROOT / "data" / "uploads" / job_id
     upload_dir.mkdir(parents=True, exist_ok=True)
 
-    # Save files from cached content
     v1_path = upload_dir / "v1.pdf"
     v2_path = upload_dir / "v2.pdf"
     v1_path.write_bytes(files_data["v1"][1])
@@ -292,7 +306,10 @@ async def upload_files(v1_file: UploadFile = File(...), v2_file: UploadFile = Fi
     # Create job with event queue for SSE streaming
     now = datetime.now(timezone.utc)
     with _JOBS_LOCK:
-        _lr_evict()
+        # LRU eviction if too many jobs
+        if len(_JOBS) >= _MAX_JOBS:
+            oldest = min(_JOBS.keys(), key=lambda k: _JOBS[k].get("created_at", datetime.min))
+            del _JOBS[oldest]
         _JOBS[job_id] = {
             "id": job_id,
             "status": "queued",
@@ -431,4 +448,4 @@ async def job_stream(job_id: str):
 # ── Main ─────────────────────────────────────────────────────────
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("web.app:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("web.app:app", host="0.0.0.0", port=8000, reload=False)
