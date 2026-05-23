@@ -13,8 +13,9 @@
   </div>
 
   <!-- Upload form -->
+  <div x-data="uploader()">
   <form action="/upload" method="post" enctype="multipart/form-data"
-        x-data="uploader()" class="space-y-5">
+        class="space-y-5">
 
     <!-- V1 card -->
     <div class="animate-fade-in stagger-1">
@@ -109,6 +110,7 @@
       </p>
     </div>
   </form>
+  </div>
 </div>
 
 <script>

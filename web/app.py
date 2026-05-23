@@ -264,24 +264,30 @@ def upload_page():
 @app.post("/upload")
 async def upload_files(v1_file: UploadFile = File(...), v2_file: UploadFile = File(...)):
     """Accept two PDFs, create job, and start pipeline."""
-    # Validate
-    for f in [v1_file, v2_file]:
+    # Validate and read file contents once
+    files_data: dict[str, tuple[str, bytes]] = {}
+    for f, key in [(v1_file, "v1"), (v2_file, "v2")]:
         if not f.filename or not f.filename.lower().endswith(".pdf"):
             return JSONResponse({"error": f"{f.filename} 不是 PDF 文件"}, status_code=400)
         content = await f.read()
         if len(content) > 50 * 1024 * 1024:
             return JSONResponse({"error": f"{f.filename} 超过 50MB 限制"}, status_code=400)
-        await f.seek(0)
+        if len(content) < 100:
+            return JSONResponse({"error": f"{f.filename} 不是有效的 PDF 文件"}, status_code=400)
+        files_data[key] = (f.filename or f"{key}.pdf", content)
 
     job_id = uuid.uuid4().hex[:8]
     upload_dir = _PROJECT_ROOT / "data" / "uploads" / job_id
     upload_dir.mkdir(parents=True, exist_ok=True)
 
-    # Save files
+    # Save files from cached content
     v1_path = upload_dir / "v1.pdf"
     v2_path = upload_dir / "v2.pdf"
-    v1_path.write_bytes(await v1_file.read())
-    v2_path.write_bytes(await v2_file.read())
+    v1_path.write_bytes(files_data["v1"][1])
+    v2_path.write_bytes(files_data["v2"][1])
+
+    v1_name = files_data["v1"][0]
+    v2_name = files_data["v2"][0]
 
     # Create job with event queue for SSE streaming
     now = datetime.now(timezone.utc)
@@ -297,15 +303,19 @@ async def upload_files(v1_file: UploadFile = File(...), v2_file: UploadFile = Fi
             "result_path": None,
             "error": None,
             "created_at": now,
-            "v1_filename": v1_file.filename or "v1.pdf",
-            "v2_filename": v2_file.filename or "v2.pdf",
+            "v1_filename": v1_name,
+            "v2_filename": v2_name,
             "v1_path": str(v1_path),
             "v2_path": str(v2_path),
             "_event_queue": queue.Queue(maxsize=500),
         }
 
     # Start pipeline in background
-    _executor.submit(_run_pipeline, job_id, str(v1_path), str(v2_path), False)
+    try:
+        _executor.submit(_run_pipeline, job_id, str(v1_path), str(v2_path), False)
+        print(f"[UPLOAD] Job {job_id} started: {v1_name} vs {v2_name}")
+    except Exception as exc:
+        print(f"[UPLOAD] Failed to start pipeline: {exc}")
 
     return RedirectResponse(url=f"/job/{job_id}", status_code=303)
 
