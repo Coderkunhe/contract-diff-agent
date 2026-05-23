@@ -579,7 +579,7 @@ def _generate_pdf(job_id: str, ids: str):
         )
 
     pdf = FPDF()
-    pdf.add_font("CJK", "", font_path, uni=True)
+    pdf.add_font("CJK", "", font_path)
 
     # Build filename from contract names
     v1_name = job.get("v1_filename", "V1") if job else "V1"
