@@ -372,12 +372,25 @@ def results_page(job_id: str, request: Request):
     with _JOBS_LOCK:
         job = _JOBS.get(job_id)
 
-    if not job:
-        return HTMLResponse("任务未找到", status_code=404)
-
-    result_path = job.get("result_path")
+    # Try to find result file (may survive server restart even if job dict doesn't)
+    result_path = job.get("result_path") if job else None
     if not result_path or not os.path.exists(result_path):
-        return HTMLResponse("结果文件不存在", status_code=404)
+        # Fallback: check data/jobs/{job_id}.json directly
+        fallback = _PROJECT_ROOT / "data" / "jobs" / f"{job_id}.json"
+        if fallback.exists():
+            result_path = str(fallback)
+
+    if not result_path or not os.path.exists(result_path):
+        return HTMLResponse("结果文件不存在 — 可能比对尚未完成或任务已过期", status_code=404)
+
+    if not job:
+        # Reconstruct minimal job metadata from file
+        job = {
+            "id": job_id,
+            "v1_filename": "V1",
+            "v2_filename": "V2",
+            "result_path": result_path,
+        }
 
     with open(result_path, encoding="utf-8") as f:
         data = json.load(f)
@@ -408,9 +421,14 @@ def results_json(job_id: str):
     """Raw JSON download."""
     with _JOBS_LOCK:
         job = _JOBS.get(job_id)
-    if not job or not job.get("result_path"):
+    result_path = job.get("result_path") if job else None
+    if not result_path or not os.path.exists(result_path):
+        fallback = _PROJECT_ROOT / "data" / "jobs" / f"{job_id}.json"
+        if fallback.exists():
+            result_path = str(fallback)
+    if not result_path or not os.path.exists(result_path):
         return JSONResponse({"error": "not found"}, status_code=404)
-    return JSONResponse(json.loads(Path(job["result_path"]).read_text(encoding="utf-8")))
+    return JSONResponse(json.loads(Path(result_path).read_text(encoding="utf-8")))
 
 
 # ── SSE Streaming ──────────────────────────────────────────────────
