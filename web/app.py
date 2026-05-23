@@ -498,6 +498,53 @@ def results_pdf(job_id: str, ids: str = ""):
         return JSONResponse({"error": f"PDF 生成失败: {str(e)[:200]}"}, status_code=500)
 
 
+def _find_cjk_font() -> str | None:
+    """Find an available CJK font across platforms (macOS, Linux, Docker)."""
+    import platform
+    paths: list[str] = []
+
+    system = platform.system()
+    if system == "Darwin":
+        paths = [
+            "/System/Library/Fonts/STHeiti Medium.ttc",
+            "/System/Library/Fonts/STHeiti Light.ttc",
+            "/System/Library/Fonts/Hiragino Sans GB.ttc",
+            "/System/Library/Fonts/PingFang.ttc",
+            "/Library/Fonts/Arial Unicode.ttf",
+        ]
+    else:  # Linux (including Docker)
+        paths = [
+            # Noto Sans CJK (most common in Docker images)
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/opentype/noto/NotoSansSC-Regular.otf",
+            # WQY ZenHei (common fallback)
+            "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+            "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+            # Droid Sans Fallback
+            "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
+            # AR PL UMing
+            "/usr/share/fonts/truetype/arphic/uming.ttc",
+        ]
+
+    # Also try any font in the list regardless of platform
+    common = [
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+        "/System/Library/Fonts/STHeiti Medium.ttc",
+        "/Library/Fonts/Arial Unicode.ttf",
+    ]
+    for p in common:
+        if p not in paths:
+            paths.append(p)
+
+    for fp in paths:
+        if os.path.exists(fp):
+            return fp
+    return None
+
+
 def _generate_pdf(job_id: str, ids: str):
     """Generate a PDF report of (confirmed) changes."""
     with _JOBS_LOCK:
@@ -524,25 +571,15 @@ def _generate_pdf(job_id: str, ids: str):
 
     from fpdf import FPDF
 
+    font_path = _find_cjk_font()
+    if not font_path:
+        return JSONResponse(
+            {"error": "PDF 生成失败: 未找到中文字体。请安装 Noto Sans CJK 或 WQY ZenHei"},
+            status_code=500,
+        )
+
     pdf = FPDF()
-    # Try PingFang first (macOS), fall back to any available CJK font
-    font_paths = [
-        "/System/Library/Fonts/STHeiti Medium.ttc",
-        "/System/Library/Fonts/STHeiti Light.ttc",
-        "/System/Library/Fonts/Hiragino Sans GB.ttc",
-        "/Library/Fonts/Arial Unicode.ttf",
-    ]
-    font_loaded = False
-    for fp in font_paths:
-        if os.path.exists(fp):
-            try:
-                pdf.add_font("CJK", "", fp, uni=True)
-                font_loaded = True
-                break
-            except Exception:
-                continue
-    if not font_loaded:
-        return JSONResponse({"error": "PDF 生成失败: 未找到中文字体"}, status_code=500)
+    pdf.add_font("CJK", "", font_path, uni=True)
 
     # Build filename from contract names
     v1_name = job.get("v1_filename", "V1") if job else "V1"

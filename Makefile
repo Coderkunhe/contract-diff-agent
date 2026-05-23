@@ -8,8 +8,7 @@ install:
 	@test -d $(VENV) || python3 -m venv $(VENV)
 	@echo "==> Installing dependencies..."
 	$(PIP) install --upgrade pip -q
-	$(PIP) install -e . -q
-	$(PIP) install fastapi "uvicorn[standard]" python-multipart jinja2 fpdf2 -q
+	$(PIP) install -e ".[web]" -q
 	@echo "==> Done. Run 'source .venv/bin/activate' or use 'make run'"
 
 run:
