@@ -273,9 +273,11 @@ def _run_pipeline(job_id: str, v1_path: str, v2_path: str, keep_english: bool):
 def _render(name: str, **ctx) -> HTMLResponse:
     """Simple Jinja2 template renderer."""
     from jinja2 import Environment, FileSystemLoader
+    import src
 
     env = Environment(loader=FileSystemLoader(str(templates_dir)))
     template = env.get_template(name)
+    ctx.setdefault("version", getattr(src, "__version__", "1.0.0"))
     return HTMLResponse(template.render(**ctx))
 
 

@@ -141,15 +141,17 @@
 
           <!-- Side-by-side snippets -->
           {% if change.v1_snippet or change.v2_snippet %}
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-2 mb-2">
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-2 mb-2" x-data="{ expanded: false }">
             <div class="bg-slate-50 rounded-lg p-2.5 border border-slate-100">
               <div class="text-[10px] text-slate-400 font-semibold uppercase tracking-wider mb-1">{{ job.v1_filename }}</div>
-              <div class="text-xs text-slate-600 leading-relaxed max-h-20 overflow-y-auto whitespace-pre-wrap">{{ change.v1_snippet or '（无对应条款）' }}</div>
+              <div class="text-xs text-slate-600 leading-relaxed whitespace-pre-wrap" :class="expanded ? '' : 'line-clamp-2'">{{ change.v1_snippet or '（无对应条款）' }}</div>
             </div>
             <div class="bg-slate-50 rounded-lg p-2.5 border border-slate-100">
               <div class="text-[10px] text-slate-400 font-semibold uppercase tracking-wider mb-1">{{ job.v2_filename }}</div>
-              <div class="text-xs text-slate-600 leading-relaxed max-h-20 overflow-y-auto whitespace-pre-wrap">{{ change.v2_snippet or '（无对应条款）' }}</div>
+              <div class="text-xs text-slate-600 leading-relaxed whitespace-pre-wrap" :class="expanded ? '' : 'line-clamp-2'">{{ change.v2_snippet or '（无对应条款）' }}</div>
             </div>
+            <button @click="expanded = !expanded" class="col-span-full text-center text-xs text-brand-600 hover:text-brand-700 font-medium transition-colors"
+                    x-text="expanded ? '收起 ▲' : '展开全文 ▼'"></button>
           </div>
           {% endif %}
 
