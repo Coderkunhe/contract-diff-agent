@@ -91,8 +91,19 @@
       </div>
     </div>
 
+    <!-- Thorough mode toggle -->
+    <div class="animate-fade-in stagger-4">
+      <label class="flex items-center gap-3 bg-white rounded-2xl border border-slate-200 p-5 cursor-pointer hover:border-brand-300 transition-all">
+        <input type="checkbox" name="thorough" value="1" class="w-5 h-5 rounded accent-brand-600">
+        <div>
+          <div class="font-semibold text-slate-700 text-sm">严谨模式</div>
+          <div class="text-xs text-slate-400 mt-0.5">独立交叉验证 + LLM 反幻觉校验，准确率更高，耗时约 2 倍</div>
+        </div>
+      </label>
+    </div>
+
     <!-- Submit -->
-    <div class="pt-2 animate-fade-in stagger-4">
+    <div class="pt-2 animate-fade-in stagger-5">
       <button type="submit"
               :disabled="!v1Name || !v2Name"
               class="w-full py-4 rounded-2xl font-semibold text-lg transition-all duration-300 flex items-center justify-center gap-2"

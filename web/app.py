@@ -231,7 +231,8 @@ def _run_pipeline(job_id: str, v1_path: str, v2_path: str, keep_english: bool):
         _send_event(job_id, "progress", {"status": "extracting", "step": "文档解析完成",
                       "progress": 9, "message": f"V1: {v1.total_pages} 页, V2: {v2.total_pages} 页"})
 
-        fake_args = argparse.Namespace(validate=False)
+        thorough = job.get("thorough", False) if job else False
+        fake_args = argparse.Namespace(validate=thorough, thorough=thorough)
 
         _send_event(job_id, "progress", {"status": "tree_building", "step": "构建条款树",
                       "progress": 12, "message": "正在解析合同条款结构..."})
@@ -307,7 +308,8 @@ def upload_page():
 
 
 @app.post("/upload")
-async def upload_files(v1_file: UploadFile = File(...), v2_file: UploadFile = File(...)):
+async def upload_files(v1_file: UploadFile = File(...), v2_file: UploadFile = File(...),
+                       thorough: bool = Form(False)):
     """Accept two PDFs, create job, and start pipeline."""
     # Validate and read file contents once
     files_data: dict[str, tuple[str, bytes]] = {}
@@ -355,6 +357,7 @@ async def upload_files(v1_file: UploadFile = File(...), v2_file: UploadFile = Fi
             "v1_path": str(v1_path),
             "v2_path": str(v2_path),
             "_event_queue": queue.Queue(maxsize=500),
+            "thorough": thorough,
         }
 
     # Start pipeline in background
