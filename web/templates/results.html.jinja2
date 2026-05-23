@@ -4,7 +4,7 @@
 {% set summary = data.diff_summary %}
 {% set changes = data.changes %}
 
-<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8" x-data="resultsFilter()">
+<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8" x-data="resultsPage()">
   <!-- Header -->
   <div class="flex flex-col sm:flex-row sm:items-end sm:justify-between mb-8 gap-4 animate-fade-in">
     <div>
@@ -99,6 +99,13 @@
          x-transition:enter-end="opacity-100 translate-y-0"
          :class="'{{ change.risk_level }}' === 'high' ? 'border-l-[3px] border-l-red-400' : ''">
       <div class="flex items-start gap-4">
+        <!-- Confirm toggle -->
+        <div class="flex-shrink-0 pt-0.5">
+          <button @click="toggle('{{ change.id }}')"
+                  class="w-8 h-8 rounded-xl flex items-center justify-center text-sm font-bold border-2 transition-all duration-200"
+                  :class="confirmed['{{ change.id }}'] ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-slate-200 text-slate-300 hover:border-emerald-300 hover:text-emerald-500'"
+                  x-text="confirmed['{{ change.id }}'] ? '✓' : '○'"></button>
+        </div>
         <!-- Risk badge -->
         <div class="flex-shrink-0 pt-0.5">
           <div class="w-8 h-8 rounded-xl flex items-center justify-center text-xs font-bold
@@ -186,17 +193,84 @@
     <p class="text-slate-600 font-medium">没有匹配的变更</p>
     <p class="text-slate-400 text-sm mt-1">尝试调整筛选条件</p>
   </div>
+
+  <!-- Confirmation bar -->
+  <div class="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t border-slate-200 px-6 py-4 z-50"
+       x-show="totalChanges > 0" x-transition:enter="transition ease-out duration-300" x-transition:enter-start="translate-y-full" x-transition:enter-end="translate-y-0">
+    <div class="max-w-7xl mx-auto flex items-center gap-4">
+      <div class="flex-1 flex items-center gap-3">
+        <div class="text-sm font-medium text-slate-600">
+          已确认 <span class="font-bold text-slate-800" x-text="confirmedCount">0</span> / <span x-text="totalChanges">{{ changes | length }}</span>
+        </div>
+        <div class="flex-1 max-w-xs bg-slate-100 rounded-full h-2 overflow-hidden">
+          <div class="h-full bg-emerald-500 rounded-full transition-all duration-500"
+               :style="'width: ' + confirmPct + '%'"></div>
+        </div>
+      </div>
+      <button @click="downloadReport()"
+              :disabled="confirmedCount === 0"
+              class="px-5 py-2 rounded-xl text-sm font-semibold transition-all duration-200"
+              :class="confirmedCount === totalChanges ? 'bg-slate-900 text-white hover:bg-slate-800 shadow-lg' : 'bg-slate-100 text-slate-400 cursor-not-allowed'"
+              x-text="confirmedCount === totalChanges ? '⬇ 下载确认报告' : '⬇ 下载报告 (' + confirmedCount + '条)'"></button>
+    </div>
+  </div>
 </div>
 
 <script>
-function resultsFilter() {
+function resultsPage() {
   return {
     riskFilter: 'all',
     typeFilter: 'all',
+    confirmed: {},
+    get totalChanges() { return {{ changes | length }}; },
+    get confirmedCount() { return Object.values(this.confirmed).filter(v => v).length; },
+    get confirmPct() { return this.totalChanges ? Math.round(this.confirmedCount / this.totalChanges * 100) : 0; },
+
+    init() {
+      // Load confirmed state from localStorage
+      const jobId = window.location.pathname.split('/').pop();
+      const saved = localStorage.getItem('confirmed_' + jobId);
+      if (saved) {
+        try { this.confirmed = JSON.parse(saved); } catch(e) {}
+      }
+    },
+
+    toggle(id) {
+      this.confirmed[id] = !this.confirmed[id];
+      const jobId = window.location.pathname.split('/').pop();
+      localStorage.setItem('confirmed_' + jobId, JSON.stringify(this.confirmed));
+    },
+
     match(risk, type) {
       if (this.riskFilter !== 'all' && risk !== this.riskFilter) return false;
       if (this.typeFilter !== 'all' && type !== this.typeFilter) return false;
       return true;
+    },
+
+    downloadReport() {
+      const confirmedIds = Object.entries(this.confirmed).filter(([k,v]) => v).map(([k]) => k);
+      if (!confirmedIds.length) return;
+
+      fetch('/api/results/' + window.location.pathname.split('/').pop() + '/json')
+        .then(r => r.json())
+        .then(data => {
+          const filtered = {
+            ...data,
+            changes: data.changes.filter(c => confirmedIds.includes(c.id)),
+            confirmation: {
+              confirmed_count: confirmedIds.length,
+              total: data.changes.length,
+              confirmed_at: new Date().toISOString(),
+            }
+          };
+          const blob = new Blob([JSON.stringify(filtered, null, 2)], {type: 'application/json'});
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = 'contract-diff-confirmed.json';
+          a.click();
+          URL.revokeObjectURL(url);
+        });
     },
   }
 }
