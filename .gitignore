@@ -11,6 +11,9 @@ __pycache__/
 dist/
 build/
 
+# Test
+.pytest_cache/
+
 # Environment
 .env
 .claude/
