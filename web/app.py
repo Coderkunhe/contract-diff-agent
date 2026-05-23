@@ -408,11 +408,18 @@ def results_page(job_id: str, request: Request):
             "added": "+", "removed": "−", "modified": "~"
         }.get(change.get("change_type", ""), "?")
 
+    # Pre-sort frequency for template (Jinja2 reverse returns iterator, can't slice)
+    freq = data.get("risk_taxonomy_snapshot", {}).get("frequency", {})
+    sorted_freq = sorted(freq.items(), key=lambda x: x[1], reverse=True)[:8]
+    max_freq_val = sorted_freq[0][1] if sorted_freq else 1
+
     return _render(
         "results.html.jinja2",
         job=job,
         data=data,
         cat_map=cat_map,
+        sorted_freq=sorted_freq,
+        max_freq_val=max_freq_val,
     )
 
 
