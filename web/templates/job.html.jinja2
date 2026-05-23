@@ -177,7 +177,8 @@ function streamer(jobId) {
         const d = JSON.parse(e.data);
         this.status = d.status || this.status;
         this.progress = d.progress || this.progress;
-        this.stepLabel = d.step || d.message || this.stepLabel;
+        this.stepLabel = d.step || this.stepLabel;
+        this.message = d.message || this.message;
       });
 
       this._es.addEventListener('change', (e) => {

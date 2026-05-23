@@ -4,7 +4,7 @@
 {% set summary = data.diff_summary %}
 {% set changes = data.changes %}
 
-<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8" x-data="resultsPage()">
+<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8" x-data="resultsPage()" x-init="initConfirms({{ changes | length }})">
   <!-- Header -->
   <div class="flex flex-col sm:flex-row sm:items-end sm:justify-between mb-8 gap-4 animate-fade-in">
     <div>
@@ -86,6 +86,8 @@
             :class="typeFilter === 'removed' ? 'bg-red-600 text-white shadow-sm' : 'bg-red-50 text-red-600 hover:bg-red-100'">删除</button>
 
     <div class="flex-1"></div>
+    <button @click="selectAll()" class="px-3 py-1.5 rounded-lg text-xs font-medium border border-slate-200 text-slate-500 hover:bg-slate-50 transition-colors"
+            x-text="allSelected ? '取消全选' : '全选'"></button>
     <span class="text-xs text-slate-400">显示 {{ changes | length }} 条</span>
   </div>
 
@@ -97,7 +99,8 @@
          x-transition:enter="transition ease-out duration-300"
          x-transition:enter-start="opacity-0 -translate-y-2"
          x-transition:enter-end="opacity-100 translate-y-0"
-         :class="'{{ change.risk_level }}' === 'high' ? 'border-l-[3px] border-l-red-400' : ''">
+         :class="'{{ change.risk_level }}' === 'high' ? 'border-l-[3px] border-l-red-400' : ''"
+         data-change-id="{{ change.id }}">
       <div class="flex items-start gap-4">
         <!-- Risk badge -->
         <div class="flex-shrink-0 pt-0.5">
@@ -175,12 +178,11 @@
               <span class="text-[10px] text-slate-400">👤 {{ change.attention_for }}</span>
               {% endif %}
             </div>
-            <div class="flex-shrink-0" x-data="{ ok: false }"
-                 x-init="const saved = localStorage.getItem('confirmed_' + window.location.pathname.split('/').pop()); const ids = saved ? JSON.parse(saved) : []; ok = ids.includes('{{ change.id }}')">
-              <button @click="ok = !ok; $dispatch('confirm-change', {id: '{{ change.id }}', value: ok})"
+            <div class="flex-shrink-0">
+              <button @click="$parent.toggleOne('{{ change.id }}')"
                       class="px-3 py-1.5 rounded-lg text-xs font-medium border-2 transition-all duration-200 min-w-[72px]"
-                      :class="ok ? 'bg-emerald-500 border-emerald-500 text-white shadow-sm' : 'border-amber-300 text-amber-500 hover:border-emerald-400 hover:text-emerald-600'">
-                <span x-text="ok ? '✓ 已确认' : '待确认'"></span>
+                      :class="$parent.isConfirmed('{{ change.id }}') ? 'bg-emerald-500 border-emerald-500 text-white shadow-sm' : 'border-amber-300 text-amber-500 hover:border-emerald-400 hover:text-emerald-600'">
+                <span x-text="$parent.isConfirmed('{{ change.id }}') ? '✓ 已确认' : '待确认'"></span>
               </button>
             </div>
           </div>
@@ -220,32 +222,59 @@
 </div>
 
 <script>
+document.addEventListener('alpine:init', () => {
+  Alpine.store('confirmSet', []);
+});
+
 function resultsPage() {
   return {
     riskFilter: 'all',
     typeFilter: 'all',
-    confirmed: [],
-    get totalChanges() { return {{ changes | length }}; },
+    allChangeIds: [],
+    get totalChanges() { return this.allChangeIds.length; },
+    get confirmed() { return Alpine.store('confirmSet'); },
     get confirmedCount() { return this.confirmed.length; },
     get confirmPct() { return this.totalChanges ? Math.round(this.confirmedCount / this.totalChanges * 100) : 0; },
+    get allSelected() { return this.confirmedCount >= this.totalChanges && this.totalChanges > 0; },
 
-    init() {
+    initConfirms(total) {
+      // Build list of all change IDs
+      document.querySelectorAll('[data-change-id]').forEach(el => {
+        this.allChangeIds.push(el.dataset.changeId);
+      });
+      // Load from localStorage
       const jobId = window.location.pathname.split('/').pop();
       const saved = localStorage.getItem('confirmed_' + jobId);
       if (saved) {
-        try { this.confirmed = JSON.parse(saved); } catch(e) {}
+        try { Alpine.store('confirmSet', JSON.parse(saved)); } catch(e) {}
       }
-      // Listen for confirmation events from card buttons
-      const self = this;
-      document.addEventListener('confirm-change', function(e) {
-        const { id, value } = e.detail;
-        if (value) {
-          if (!self.confirmed.includes(id)) self.confirmed.push(id);
-        } else {
-          self.confirmed = self.confirmed.filter(x => x !== id);
-        }
-        localStorage.setItem('confirmed_' + jobId, JSON.stringify(self.confirmed));
-      });
+    },
+
+    toggleOne(id) {
+      const set = Alpine.store('confirmSet');
+      const idx = set.indexOf(id);
+      if (idx >= 0) {
+        set.splice(idx, 1);
+      } else {
+        set.push(id);
+      }
+      const jobId = window.location.pathname.split('/').pop();
+      localStorage.setItem('confirmed_' + jobId, JSON.stringify(set));
+    },
+
+    isConfirmed(id) {
+      return Alpine.store('confirmSet').includes(id);
+    },
+
+    selectAll() {
+      const set = Alpine.store('confirmSet');
+      if (this.allSelected) {
+        set.splice(0, set.length);
+      } else {
+        set.splice(0, set.length, ...this.allChangeIds);
+      }
+      const jobId = window.location.pathname.split('/').pop();
+      localStorage.setItem('confirmed_' + jobId, JSON.stringify(set));
     },
 
     match(risk, type) {
