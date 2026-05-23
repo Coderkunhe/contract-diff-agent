@@ -105,17 +105,24 @@ class JobProgressIO(io.StringIO):
             return
         jid = self._job_id
         now = datetime.now(timezone.utc)
-        # Stage detection
+        # Stage detection — update job AND push SSE event
+        stage_info = None
         if "①" in line or "构建条款树" in line:
-            _update_job_inner(jid, status="tree_building", progress=10, message=line, timestamp=now)
+            stage_info = ("tree_building", 10, "构建条款树")
         elif "②" in line or "条款对齐" in line:
-            _update_job_inner(jid, status="aligning", progress=20, message=line, timestamp=now)
+            stage_info = ("aligning", 20, "条款对齐")
         elif "③" in line or "差异识别" in line:
-            _update_job_inner(jid, status="identifying", progress=30, message=line, timestamp=now)
+            stage_info = ("identifying", 30, "LLM 逐条比对差异")
         elif "④" in line or "校验" in line:
-            _update_job_inner(jid, status="validating", progress=55, message=line, timestamp=now)
+            stage_info = ("validating", 55, "校验差异")
         elif "⑤" in line or "风险分类" in line:
-            _update_job_inner(jid, status="classifying", progress=75, message=line, timestamp=now)
+            stage_info = ("classifying", 75, "风险分类")
+
+        if stage_info:
+            status, progress, label = stage_info
+            _update_job_inner(jid, status=status, progress=progress, message=line, timestamp=now)
+            _send_event(jid, "progress", {"status": status, "step": label, "progress": progress, "message": line})
+
         # Sub-stage progress
         m = re.search(r"校验进度:\s*(\d+)/(\d+)", line)
         if m:
@@ -126,6 +133,12 @@ class JobProgressIO(io.StringIO):
         if m:
             cur, total = int(m.group(1)), int(m.group(2))
             pct = 75 + int(25 * cur / total) if total else 75
+            _update_job_inner(jid, progress=pct, message=line, timestamp=now)
+        # Per-clause progress: "[N/M] title... -> X changes"
+        m = re.search(r"\[(\d+)/(\d+)\]\s", line)
+        if m:
+            cur, total = int(m.group(1)), int(m.group(2))
+            pct = 30 + int(25 * cur / total) if total else 30
             _update_job_inner(jid, progress=pct, message=line, timestamp=now)
         # Accumulate log
         _append_log_inner(jid, line)
