@@ -537,7 +537,9 @@ def _generate_pdf(job_id: str, ids: str):
     v2_name = job.get("v2_filename", "V2") if job else "V2"
     v1_base = v1_name.rsplit(".", 1)[0] if "." in v1_name else v1_name
     v2_base = v2_name.rsplit(".", 1)[0] if "." in v2_name else v2_name
-    pdf_filename = f"{v1_base}_vs_{v2_base}_差异报告.pdf"
+    safe_v1 = v1_base.replace(" ", "_")[:30]
+    safe_v2 = v2_base.replace(" ", "_")[:30]
+    pdf_filename = f"contract_diff_report.pdf"  # ASCII-safe filename
     confirmed_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
     pdf.add_page()
@@ -606,7 +608,7 @@ def _generate_pdf(job_id: str, ids: str):
         if c.get("clause_ref_v2") or c.get("clause_ref_v1"):
             pdf.set_font("CJK", "", 9)
             pdf.set_text_color(120, 120, 120)
-            pdf.cell(0, 6, f"📍 {c.get('clause_ref_v2') or c.get('clause_ref_v1', '')}", new_x="LMARGIN", new_y="NEXT")
+            pdf.cell(0, 6, f"> {c.get('clause_ref_v2') or c.get('clause_ref_v1', '')}", new_x="LMARGIN", new_y="NEXT")
             pdf.set_text_color(0, 0, 0)
         pdf.ln(2)
 
@@ -637,7 +639,7 @@ def _generate_pdf(job_id: str, ids: str):
                 pdf.set_text_color(180, 120, 20)
             else:
                 pdf.set_text_color(100, 100, 100)
-            pdf.multi_cell(0, 6, f"⚠ 风险提示: {note}"[:300])
+            pdf.multi_cell(0, 6, f"[!] 风险提示: {note}"[:300])
             pdf.set_text_color(0, 0, 0)
             pdf.ln(2)
 
@@ -648,8 +650,11 @@ def _generate_pdf(job_id: str, ids: str):
         pdf.set_text_color(0, 0, 0)
 
     pdf_bytes = bytes(pdf.output())
+    from urllib.parse import quote
     return Response(content=pdf_bytes, media_type="application/pdf",
-                    headers={"Content-Disposition": f"attachment; filename*=UTF-8''{pdf_filename}"})
+                    headers={"Content-Disposition":
+                             f"attachment; filename=\"{pdf_filename}\"; "
+                             f"filename*=UTF-8''{quote(pdf_filename)}"})
 
 
 @app.get("/api/results/{job_id}/json")
