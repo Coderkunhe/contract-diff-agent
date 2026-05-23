@@ -1,4 +1,4 @@
-"""Clause tree extraction - Step ① of the contract diff pipeline.
+"""Clause tree extraction — Step ① of the contract diff pipeline.
 
 Parses a contract's full text into a structured clause tree.
 """
@@ -6,19 +6,15 @@ Parses a contract's full text into a structured clause tree.
 import re
 from dataclasses import dataclass, field
 
-# Match Chinese numbered sections: 一、 二、 ... 十九、
 _RE_L1 = re.compile(
     r"^([一二三四五六七八九十]{1,3})[、，,．. ]\s*(.+)"
 )
-# Match sub-clauses: （一） （二） or (一) (二)
 _RE_L2 = re.compile(
     r"^[（(]([一二三四五六七八九十]{1,3})[）)]\s*(.+)"
 )
-# Match attachments: 附件一 附件二
 _RE_ATTACHMENT = re.compile(
     r"^附件([一二三四五六七八九十]{1,2})\s*(.+)"
 )
-# Match table/index-like garbage lines (fees schedule tables)
 _RE_TABLE_HEADER = re.compile(
     r"^(三|四|技术|服务|经营|大类|费率|年费|返还|二级|三级|备注|跨类目)"
 )
@@ -27,9 +23,9 @@ _RE_TABLE_HEADER = re.compile(
 @dataclass
 class ClauseNode:
     id: str
-    number: str  # e.g. "一", "（一）"
+    number: str
     title: str
-    level: int  # 1 = chapter, 2 = sub-clause
+    level: int
     full_text: str
     page_start: int | None = None
     children: list["ClauseNode"] = field(default_factory=list)
@@ -40,24 +36,15 @@ class ContractTree:
     file_path: str
     total_pages: int
     clauses: list[ClauseNode]
-    attachments: list[dict]  # {title, full_text}
-    tables: list[dict]  # {page, caption, raw_text}
-    full_text_sections: dict[str, str]  # clause_id -> raw text block
+    attachments: list[dict]
+    tables: list[dict]
+    full_text_sections: dict[str, str]
 
 
 def build_clause_tree(
     full_text: str,
     pages_data: list[dict] | None = None,
 ) -> ContractTree:
-    """Parse contract text into a structured clause tree.
-
-    Args:
-        full_text: The full contract text (Chinese-only, filtered).
-        pages_data: Optional list of {page_num, text, tables} per page.
-
-    Returns:
-        ContractTree with nested clause structure.
-    """
     lines = full_text.split("\n")
     clauses: list[ClauseNode] = []
     attachments: list[dict] = []
@@ -71,7 +58,6 @@ def build_clause_tree(
     l1_idx = 0
 
     def flush_to_clause():
-        """Flush accumulated text buffer to current L2 (if exists) or current L1."""
         nonlocal buf
         if not buf:
             return
@@ -97,7 +83,6 @@ def build_clause_tree(
             buf.append("")
             continue
 
-        # Attachment detection
         att_m = _RE_ATTACHMENT.match(s)
         if att_m and not in_attachment:
             flush_to_clause()
@@ -123,7 +108,6 @@ def build_clause_tree(
                 attachment_buf.append(s)
                 continue
 
-        # L1: must check BEFORE table detection to avoid false matches
         l1_m = _RE_L1.match(s)
         if l1_m:
             flush_to_clause()
@@ -142,7 +126,6 @@ def build_clause_tree(
             buf = [s]
             continue
 
-        # Skip table garbled lines (but only if not a clause header)
         if _RE_TABLE_HEADER.match(s) and len(s) < 10:
             in_table_area = True
             continue
@@ -153,7 +136,6 @@ def build_clause_tree(
             else:
                 in_table_area = False
 
-        # L2
         l2_m = _RE_L2.match(s)
         if l2_m and current_l1 is not None:
             flush_to_clause()
@@ -169,10 +151,8 @@ def build_clause_tree(
             buf = [s]
             continue
 
-        # Normal text
         buf.append(s)
 
-    # Final flush
     flush_to_clause()
 
     if in_attachment and attachment_buf:
@@ -184,7 +164,6 @@ def build_clause_tree(
     if current_l1:
         clauses.append(current_l1)
 
-    # Post-process: filter table artifacts (clauses from garbled table text)
     _TABLE_KEYWORDS = ["技术", "费率", "年费", "类目", "返还", "扣点", "积分"]
     clauses = [
         c for c in clauses
@@ -195,7 +174,6 @@ def build_clause_tree(
         )
     ]
 
-    # Extract tables from page data
     tables: list[dict] = []
     if pages_data:
         for p in pages_data:
@@ -203,38 +181,29 @@ def build_clause_tree(
                 if t and len(t[0]) >= 2:
                     tables.append({
                         "page": p["page_num"],
-                        "raw_text": _flatten_table(t),
+                        "raw_text": _flatten_table_text(t),
                     })
 
-    # Build text sections lookup
     sections: dict[str, dict] = {}
     for clause in clauses:
         sections[clause.id] = {
-            "number": clause.number,
-            "title": clause.title,
-            "level": clause.level,
-            "full_text": clause.full_text,
+            "number": clause.number, "title": clause.title,
+            "level": clause.level, "full_text": clause.full_text,
         }
         for child in clause.children:
             sections[child.id] = {
-                "number": child.number,
-                "title": child.title,
-                "level": child.level,
-                "full_text": child.full_text,
+                "number": child.number, "title": child.title,
+                "level": child.level, "full_text": child.full_text,
             }
 
     return ContractTree(
-        file_path="",
-        total_pages=0,
-        clauses=clauses,
-        attachments=attachments,
-        tables=tables,
+        file_path="", total_pages=0,
+        clauses=clauses, attachments=attachments, tables=tables,
         full_text_sections=sections,
     )
 
 
-def _flatten_table(table: list[list[str | None]]) -> str:
-    """Convert a multi-column table to readable text."""
+def _flatten_table_text(table: list[list[str | None]]) -> str:
     rows = []
     for row in table:
         cells = [str(c).strip() if c else "" for c in row]
@@ -243,7 +212,6 @@ def _flatten_table(table: list[list[str | None]]) -> str:
 
 
 def print_tree(tree: ContractTree):
-    """Debug: print clause tree structure."""
     for c in tree.clauses:
         print(f"[{c.id}] {c.number}、{c.title} ({len(c.full_text)} chars)")
         for child in c.children:

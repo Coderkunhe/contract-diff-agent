@@ -1,6 +1,6 @@
 """Tests for clause alignment (Step ②)."""
 import pytest
-from src.clause_aligner import align_clauses, _sim, _strip_suffixes
+from src.pipeline.alignment import align_clauses, _sim, _strip_suffixes
 
 
 class TestSimilarity:

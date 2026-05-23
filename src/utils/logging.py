@@ -6,19 +6,10 @@ from pathlib import Path
 
 
 def setup_logging(level: str = "INFO", log_file: str | None = None) -> logging.Logger:
-    """Configure application-wide logging.
-
-    Args:
-        level: Log level (DEBUG, INFO, WARNING, ERROR).
-        log_file: Optional file path for persistent logs.
-    """
     logger = logging.getLogger("contract_diff")
     logger.setLevel(getattr(logging, level.upper(), logging.INFO))
-
-    # Clear existing handlers to avoid duplicates
     logger.handlers.clear()
 
-    # Console handler
     console = logging.StreamHandler(sys.stderr)
     console.setLevel(logging.DEBUG)
     console.setFormatter(logging.Formatter(
@@ -27,7 +18,6 @@ def setup_logging(level: str = "INFO", log_file: str | None = None) -> logging.L
     ))
     logger.addHandler(console)
 
-    # File handler (optional)
     if log_file:
         path = Path(log_file)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -42,5 +32,4 @@ def setup_logging(level: str = "INFO", log_file: str | None = None) -> logging.L
 
 
 def get_logger() -> logging.Logger:
-    """Get the application logger."""
     return logging.getLogger("contract_diff")

@@ -6,9 +6,9 @@ import sys
 # Ensure src/ is on path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.pdf_extractor import extract_contract
-from src.clause_tree import build_clause_tree
-from src.clause_aligner import align_clauses
+from src.pipeline.extraction import extract_contract
+from src.pipeline.parsing import build_clause_tree
+from src.pipeline.alignment import align_clauses
 
 
 @pytest.fixture(scope="session")

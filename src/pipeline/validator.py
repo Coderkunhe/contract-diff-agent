@@ -1,4 +1,4 @@
-"""Validation agent - Step ④ of the contract diff pipeline.
+"""Validation agent — Step ④ of the contract diff pipeline.
 
 L2: Algorithmic snippet existence check
 L3: LLM semantic validation
@@ -12,40 +12,11 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
 from json_repair import repair_json
-from .model_pool import AutoFallbackClient
+
+from src.llm.client import AutoFallbackClient
+from src.prompts.validator import build_validator_prompt, VALIDATOR_SYSTEM
 
 _VALIDATE_MAX_WORKERS = 8
-
-VALIDATOR_SYSTEM = """你是合同比对验证专家。你的任务是验证一条声称的合同差异是否真实存在。
-
-## 输入
-- V1 原文片段
-- V2 原文片段
-- 声称的变化描述
-
-## 输出
-输出一个 JSON：
-{
-  "verdict": "confirmed|rejected|uncertain",
-  "reason": "简短理由（30字以内）"
-}
-
-- confirmed: 原文明确支持该变化
-- rejected: 原文不支持（可能是幻觉或过度解读）
-- uncertain: 原文模糊，无法确认
-
-只输出 JSON。"""
-
-VALIDATOR_USER = """## V1 原文:
-{v1_text}
-
-## V2 原文:
-{v2_text}
-
-## 声称的变化:
-{claim}
-
-验证该变化是否真实。输出 JSON。"""
 
 
 def validate_changes(
@@ -58,15 +29,11 @@ def validate_changes(
     max_retries: int = 2,
     max_workers: int = _VALIDATE_MAX_WORKERS,
 ) -> list[dict]:
-    """Validate all changes: L2 (algorithm, fast) + L3 (LLM, PARALLEL)."""
-
-    # L2: all at once (fast, no API calls)
     print(f"  L2 原文校验 ({len(changes)} 条)...")
     for change in changes:
         l2_result = _l2_check(change, v1_full_text, v2_full_text)
         change["_l2"] = l2_result
 
-    # L3: only for LLM-generated changes, in parallel
     llm_changes = [(i, c) for i, c in enumerate(changes) if c.get("source") == "llm"]
     if not llm_changes:
         for c in changes:
@@ -99,7 +66,6 @@ def validate_changes(
                           f"(confirmed={stats['confirmed']}, rejected={stats['rejected']}, "
                           f"uncertain={stats['uncertain']})")
 
-    # Merge L2 + L3 into validation field
     for change in changes:
         l2 = change.pop("_l2", {})
         l3 = change.pop("_l3", {})
@@ -130,7 +96,6 @@ def _conf_from(verdict: str) -> float:
 
 
 def _l2_check(change: dict, v1_text: str, v2_text: str) -> dict:
-    """Algorithmic check: verify snippets exist in original texts."""
     result = {
         "l2_v1_snippet_found": False,
         "l2_v2_snippet_found": False,
@@ -141,19 +106,17 @@ def _l2_check(change: dict, v1_text: str, v2_text: str) -> dict:
     v2_snippet = change.get("v2_snippet")
 
     if v1_snippet:
-        # Fuzzy find: try exact first, then first 30 chars
         if v1_snippet in v1_text:
             result["l2_v1_snippet_found"] = True
         elif len(v1_snippet) > 30 and v1_snippet[:30] in v1_text:
             result["l2_v1_snippet_found"] = True
         else:
-            # Try finding key words (longest word in snippet)
             words = re.findall(r"[一-鿿\w]+", v1_snippet)
             longest = max(words, key=len) if words else ""
             if longest and len(longest) > 4 and longest in v1_text:
                 result["l2_v1_snippet_found"] = True
     else:
-        result["l2_v1_snippet_found"] = True  # No snippet to check
+        result["l2_v1_snippet_found"] = True
 
     if v2_snippet:
         if v2_snippet in v2_text:
@@ -178,16 +141,11 @@ def _l3_validate(
     client: AutoFallbackClient,
     max_retries: int,
 ) -> dict:
-    """LLM semantic validation with retry loop."""
     claim = change.get("brief", "")
     v1_snippet = change.get("v1_snippet") or ""
     v2_snippet = change.get("v2_snippet") or ""
 
-    prompt = VALIDATOR_USER.format(
-        v1_text=v1_snippet[:1000] or "（无）",
-        v2_text=v2_snippet[:1000] or "（无）",
-        claim=claim,
-    )
+    prompt = build_validator_prompt(v1_snippet, v2_snippet, claim)
 
     for attempt in range(1, max_retries + 1):
         try:
@@ -220,12 +178,8 @@ def _l3_validate(
 
         except Exception as e:
             if attempt < max_retries:
-                # Retry with error context in prompt
-                prompt = VALIDATOR_USER.format(
-                    v1_text=v1_snippet[:1000] or "（无）",
-                    v2_text=v2_snippet[:1000] or "（无）",
-                    claim=claim,
-                ) + f"\n\n（上次验证失败: {e}。请重试。）"
+                prompt = build_validator_prompt(v1_snippet, v2_snippet, claim) + \
+                         f"\n\n（上次验证失败: {e}。请重试。）"
             else:
                 return {
                     "l3_verdict": "uncertain",

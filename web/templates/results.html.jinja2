@@ -186,6 +186,29 @@
               </button>
             </div>
           </div>
+
+          <!-- Human note -->
+          <div class="mt-2" x-data="{ noteOpen: false }">
+            <button @click="noteOpen = !noteOpen"
+                    class="text-[11px] text-slate-400 hover:text-brand-600 transition-colors font-medium">
+              <span x-text="noteOpen ? '收起备注 ▲' : (getNote('{{ change.id }}') ? '✎ 备注 (' + getNote('{{ change.id }}').length + '字) ▼' : '+ 添加备注 ▼')"></span>
+            </button>
+            <div x-show="noteOpen" x-transition class="mt-1.5">
+              <div class="flex gap-2 items-start">
+                <textarea x-model="notes['{{ change.id }}']"
+                          @blur="saveNote('{{ change.id }}')"
+                          class="flex-1 text-xs border border-slate-200 rounded-lg px-3 py-2 focus:border-brand-400 focus:ring-1 focus:ring-brand-200 outline-none resize-y min-h-[48px]"
+                          placeholder="备注（可选）— 失焦自动保存"
+                          rows="2"></textarea>
+                <button @click="saveNote('{{ change.id }}')"
+                        class="flex-shrink-0 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-brand-50 text-brand-600 hover:bg-brand-100 transition-colors">
+                  保存
+                </button>
+              </div>
+              <span x-show="saveMsg === '{{ change.id }}'" x-transition
+                    class="text-[10px] text-emerald-500">✓ 已保存</span>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -231,6 +254,8 @@ function resultsPage() {
     riskFilter: 'all',
     typeFilter: 'all',
     allChangeIds: [],
+    notes: {},
+    saveMsg: '',
     get totalChanges() { return this.allChangeIds.length; },
     get confirmed() { return Alpine.store('confirmSet'); },
     get confirmedCount() { return this.confirmed.length; },
@@ -248,6 +273,32 @@ function resultsPage() {
       if (saved) {
         try { Alpine.store('confirmSet', JSON.parse(saved)); } catch(e) {}
       }
+      // Load existing notes from server
+      fetch('/api/results/' + jobId + '/json')
+        .then(r => r.json())
+        .then(data => {
+          (data.changes || []).forEach(c => {
+            if (c.id && c.human_note) this.notes[c.id] = c.human_note;
+          });
+        })
+        .catch(() => {});
+    },
+
+    getNote(id) {
+      return this.notes[id] || '';
+    },
+
+    saveNote(id) {
+      const jobId = window.location.pathname.split('/').pop();
+      const note = this.notes[id] || '';
+      fetch('/api/results/' + jobId + '/notes', {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({notes: {[id]: note}}),
+      }).then(() => {
+        this.saveMsg = id;
+        setTimeout(() => { this.saveMsg = ''; }, 2000);
+      }).catch(() => {});
     },
 
     toggleOne(id) {

@@ -1,6 +1,6 @@
 """Tests for clause tree extraction (Step ①b)."""
 import pytest
-from src.clause_tree import build_clause_tree, ClauseNode
+from src.pipeline.parsing import build_clause_tree, ClauseNode
 
 
 class TestBuildClauseTree:

@@ -1,10 +1,11 @@
+"""PDF/DOCX text extraction — Step ① of the contract diff pipeline."""
+
 import os
 import pdfplumber
 from dataclasses import dataclass, field
 
 
 def _flatten_table(rows: list[list[str]]) -> str:
-    """Convert a list of cell rows to readable text."""
     return "\n".join(" | ".join(str(c).strip() for c in row) for row in rows)
 
 
@@ -25,10 +26,6 @@ class ContractDocument:
 
 
 def extract_contract(file_path: str, keep_english: bool = False) -> ContractDocument:
-    """Extract text from a contract file (PDF or DOCX).
-
-    Auto-detects format by file extension.
-    """
     ext = os.path.splitext(file_path)[1].lower()
     if ext == ".docx":
         return _extract_docx(file_path, keep_english)
@@ -36,23 +33,13 @@ def extract_contract(file_path: str, keep_english: bool = False) -> ContractDocu
 
 
 def _extract_docx(file_path: str, keep_english: bool = False) -> ContractDocument:
-    """Extract text and tables from a Word document."""
     import docx
-
     doc = docx.Document(file_path)
     paragraphs: list[str] = []
-    tables_data: list[dict] = []
 
     for para in doc.paragraphs:
         if para.text.strip():
             paragraphs.append(para.text)
-
-    for i, table in enumerate(doc.tables):
-        rows = []
-        for row in table.rows:
-            cells = [cell.text.strip() for cell in row.cells]
-            rows.append(cells)
-        tables_data.append({"page": i + 1, "raw_text": _flatten_table(rows)})
 
     full_text = "\n".join(paragraphs)
     bilingual_text = full_text
@@ -60,24 +47,14 @@ def _extract_docx(file_path: str, keep_english: bool = False) -> ContractDocumen
     if not keep_english:
         full_text = _strip_english(full_text)
 
-    # Create a single virtual page
     page = ContractPage(page_num=1, text=full_text)
     return ContractDocument(
-        file_path=file_path,
-        total_pages=1,
-        pages=[page],
-        full_text=full_text,
-        full_text_bilingual=bilingual_text,
+        file_path=file_path, total_pages=1, pages=[page],
+        full_text=full_text, full_text_bilingual=bilingual_text,
     )
 
 
 def _extract_pdf(file_path: str, keep_english: bool = False) -> ContractDocument:
-    """Extract text and tables from a contract PDF.
-
-    If keep_english is True, bilingual content is preserved as-is.
-    If False (default), attempts to filter out English text for Chinese-only analysis,
-    reducing token usage significantly for bilingual contracts.
-    """
     pages: list[ContractPage] = []
     full_text_parts: list[str] = []
     bilingual_parts: list[str] = []
@@ -86,39 +63,24 @@ def _extract_pdf(file_path: str, keep_english: bool = False) -> ContractDocument
         for i, page in enumerate(pdf.pages):
             text = page.extract_text() or ""
             tables = page.extract_tables() or []
-
-            # Only keep tables with 2+ columns (actual data tables, not layout boxes)
             real_tables = [t for t in tables if t and len(t[0]) >= 2]
 
-            pages.append(ContractPage(
-                page_num=i + 1,
-                text=text,
-                tables=real_tables,
-            ))
+            pages.append(ContractPage(page_num=i + 1, text=text, tables=real_tables))
 
             if text:
                 bilingual_parts.append(text)
                 full_text_parts.append(_strip_english(text) if not keep_english else text)
 
-    # Build full text (potentially Chinese-only)
     full_text = "\n\n".join(full_text_parts)
     full_text_bilingual = "\n\n".join(bilingual_parts)
 
     return ContractDocument(
-        file_path=file_path,
-        total_pages=len(pages),
-        pages=pages,
-        full_text=full_text,
-        full_text_bilingual=full_text_bilingual,
+        file_path=file_path, total_pages=len(pages), pages=pages,
+        full_text=full_text, full_text_bilingual=full_text_bilingual,
     )
 
 
 def _strip_english(text: str) -> str:
-    """Remove English lines from bilingual contract text.
-
-    Heuristic: a line is English if < 20% of its chars are CJK or punctuation.
-    This preserves Chinese content while dropping the English translation side.
-    """
     lines = text.split("\n")
     chinese_lines: list[str] = []
 
@@ -145,14 +107,12 @@ def _is_cjk(c: str) -> bool:
 
 
 def estimate_tokens(text: str) -> int:
-    """Rough token estimate: CJK chars ~1 token each, others ~0.75 token."""
     cjk = sum(1 for c in text if _is_cjk(c))
     other = len(text) - cjk
     return int(cjk * 1.0 + other * 0.75)
 
 
 def extract_table_text(tables: list[list[list[str]]]) -> str:
-    """Flatten multi-column tables into markdown-like text for diff analysis."""
     parts: list[str] = []
     for table in tables:
         parts.append("--- TABLE ---")

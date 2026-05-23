@@ -1,6 +1,6 @@
 [project]
 name = "contract-diff-agent"
-version = "0.4.0"
+version = "1.4.0"
 description = "风控合规 Agent — 合同差异比对与风险提示"
 requires-python = ">=3.12"
 dependencies = [

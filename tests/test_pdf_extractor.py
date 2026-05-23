@@ -1,6 +1,6 @@
 """Tests for PDF extraction (Step ①a)."""
 import pytest
-from src.pdf_extractor import extract_contract, estimate_tokens, _strip_english, _is_cjk
+from src.pipeline.extraction import extract_contract, estimate_tokens, _strip_english, _is_cjk
 
 
 class TestExtractContract:

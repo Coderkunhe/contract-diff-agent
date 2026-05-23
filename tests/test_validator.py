@@ -1,6 +1,6 @@
 """Tests for validation (Step ④ L2)."""
 import pytest
-from src.validator import _l2_check, _verdict_to_status, _verdict_to_confidence
+from src.pipeline.validator import _l2_check, _verdict_to_status, _verdict_to_confidence
 
 
 class TestL2Check:

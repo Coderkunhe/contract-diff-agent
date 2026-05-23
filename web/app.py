@@ -30,11 +30,11 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_PROJECT_ROOT))
 
 from src.config import AppConfig
-from src.pdf_extractor import extract_contract
-from src.main import _run_v03
+from src.pipeline.extraction import extract_contract
+from src.main import _run_v04
 
 # ── App ──────────────────────────────────────────────────────────
-app = FastAPI(title="合同差异比对工具", version="0.4.0")
+app = FastAPI(title="合同差异比对工具", version="1.4.0")
 templates_dir = Path(__file__).resolve().parent / "templates"
 
 # ── Config ────────────────────────────────────────────────────────
@@ -62,8 +62,9 @@ _JOB_STATUS_STEPS = {
     "extracting": (5, "提取 PDF 文本"),
     "tree_building": (10, "构建条款树"),
     "aligning": (20, "对齐条款"),
-    "identifying": (30, "LLM 识别差异"),
-    "validating": (55, "校验变化"),
+    "traditional_diff": (25, "传统算法对比"),
+    "enhancing": (30, "LLM 增强描述"),
+    "validating": (55, "L2 原文校验"),
     "classifying": (75, "风险分类"),
     "done": (100, "完成"),
     "error": (0, "出错"),
@@ -107,16 +108,20 @@ class JobProgressIO(io.StringIO):
         now = datetime.now(timezone.utc)
         # Stage detection — update job AND push SSE event
         stage_info = None
-        if "①" in line or "构建条款树" in line:
+        if "构建条款树" in line:
             stage_info = ("tree_building", 10, "构建条款树")
-        elif "②" in line or "条款对齐" in line:
+        elif "条款对齐" in line:
             stage_info = ("aligning", 20, "条款对齐")
-        elif "③" in line or "差异识别" in line:
-            stage_info = ("identifying", 30, "LLM 逐条比对差异")
-        elif "④" in line or "校验" in line:
-            stage_info = ("validating", 55, "校验差异")
-        elif "⑤" in line or "风险分类" in line:
+        elif "传统算法对比" in line or "传统算法识别" in line:
+            stage_info = ("traditional_diff", 25, "传统算法对比")
+        elif "LLM 增强描述" in line or "LLM增强" in line:
+            stage_info = ("enhancing", 30, "LLM 增强描述")
+        elif "校验" in line or "原文校验" in line:
+            stage_info = ("validating", 55, "L2 原文校验")
+        elif "风险分类" in line:
             stage_info = ("classifying", 75, "风险分类")
+        elif "离线模式" in line:
+            stage_info = ("validating", 25, "离线模式跳过 LLM")
 
         if stage_info:
             status, progress, label = stage_info
@@ -214,6 +219,7 @@ def _run_pipeline(job_id: str, v1_path: str, v2_path: str, keep_english: bool):
             "clause_ref_v2": change.get("clause_ref_v2") or change.get("clause_ref_v1", ""),
             "attention_for": change.get("attention_for"),
             "is_favorable": change.get("is_favorable"),
+            "human_note": change.get("human_note"),
         })
 
     try:
@@ -231,8 +237,9 @@ def _run_pipeline(job_id: str, v1_path: str, v2_path: str, keep_english: bool):
         _send_event(job_id, "progress", {"status": "extracting", "step": "文档解析完成",
                       "progress": 9, "message": f"V1: {v1.total_pages} 页, V2: {v2.total_pages} 页"})
 
+        offline = not bool(config.api_key)
         thorough = job.get("thorough", False) if job else False
-        fake_args = argparse.Namespace(validate=thorough, thorough=thorough)
+        fake_args = argparse.Namespace(validate=thorough, thorough=thorough, offline=offline)
 
         _send_event(job_id, "progress", {"status": "tree_building", "step": "构建条款树",
                       "progress": 12, "message": "正在解析合同条款结构..."})
@@ -243,7 +250,7 @@ def _run_pipeline(job_id: str, v1_path: str, v2_path: str, keep_english: bool):
         sys.stdout = tracker
 
         try:
-            result = _run_v03(
+            result = _run_v04(
                 fake_args, v1, v2,
                 api_key=config.api_key,
                 base_url=config.base_url,
@@ -431,7 +438,7 @@ def results_page(job_id: str, request: Request):
         data = json.load(f)
 
     # Risk category name mapping
-    from src.risk_classifier import RISK_CATEGORIES
+    from src.constants.risks import RISK_CATEGORIES
     cat_map = {c["id"]: c["name"] for c in RISK_CATEGORIES}
 
     # Enrich changes with category names
@@ -648,6 +655,15 @@ def _generate_pdf(job_id: str, ids: str):
             pdf.set_text_color(0, 0, 0)
             pdf.ln(2)
 
+        # Human note
+        note = c.get("human_note", "")
+        if note:
+            pdf.set_font("CJK", "", 9)
+            pdf.set_text_color(80, 80, 160)
+            pdf.multi_cell(0, 6, f"[备注] {note}"[:300])
+            pdf.set_text_color(0, 0, 0)
+            pdf.ln(2)
+
         # Confirmation time
         pdf.set_font("CJK", "", 8)
         pdf.set_text_color(160, 160, 160)
@@ -660,6 +676,40 @@ def _generate_pdf(job_id: str, ids: str):
                     headers={"Content-Disposition":
                              f"attachment; filename=\"{pdf_filename}\"; "
                              f"filename*=UTF-8''{quote(pdf_filename)}"})
+
+
+@app.put("/api/results/{job_id}/notes")
+async def update_notes(job_id: str, request: Request):
+    """Save human notes for confirmed changes."""
+    body = await request.json()
+    notes = body.get("notes", {})  # {change_id: note_text}
+
+    result_path = None
+    with _JOBS_LOCK:
+        job = _JOBS.get(job_id)
+        if job:
+            result_path = job.get("result_path")
+    if not result_path:
+        fallback = _PROJECT_ROOT / "data" / "jobs" / f"{job_id}.json"
+        if fallback.exists():
+            result_path = str(fallback)
+    if not result_path or not os.path.exists(result_path):
+        return JSONResponse({"error": "not found"}, status_code=404)
+
+    with open(result_path, encoding="utf-8") as f:
+        data = json.load(f)
+
+    updated = 0
+    for change in data.get("changes", []):
+        cid = change.get("id", "")
+        if cid in notes:
+            change["human_note"] = notes[cid]
+            updated += 1
+
+    with open(result_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+    return JSONResponse({"updated": updated})
 
 
 @app.get("/api/results/{job_id}/json")
