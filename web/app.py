@@ -515,9 +515,10 @@ def _generate_pdf(job_id: str, ids: str):
     pdf = FPDF()
     # Try PingFang first (macOS), fall back to any available CJK font
     font_paths = [
-        "/System/Library/Fonts/PingFang.ttc",
+        "/System/Library/Fonts/STHeiti Medium.ttc",
         "/System/Library/Fonts/STHeiti Light.ttc",
         "/System/Library/Fonts/Hiragino Sans GB.ttc",
+        "/Library/Fonts/Arial Unicode.ttf",
     ]
     font_loaded = False
     for fp in font_paths:
@@ -572,7 +573,7 @@ def _generate_pdf(job_id: str, ids: str):
         # Brief
         pdf.set_font("CJK", "", 10)
         pdf.ln(1)
-        pdf.multi_cell(0, 6, c.get("brief", ""), max_lines=3)
+        pdf.multi_cell(0, 6, c.get("brief", "")[:200])
 
         # Snippets
         v1 = c.get("v1_snippet", "")
@@ -597,14 +598,14 @@ def _generate_pdf(job_id: str, ids: str):
                 pdf.set_text_color(180, 120, 20)
             else:
                 pdf.set_text_color(80, 80, 80)
-            pdf.multi_cell(0, 5, f"风险提示: {note}", max_lines=4)
+            pdf.multi_cell(0, 5, f"风险提示: {note}"[:300])
             pdf.set_text_color(0, 0, 0)
 
         # Check page break
         if pdf.get_y() > 240 and i < len(filtered) - 1:
             pdf.add_page()
 
-    pdf_bytes = pdf.output()
+    pdf_bytes = bytes(pdf.output())
     return Response(content=pdf_bytes, media_type="application/pdf",
                     headers={"Content-Disposition": f"attachment; filename=contract-diff-report.pdf"})
 
