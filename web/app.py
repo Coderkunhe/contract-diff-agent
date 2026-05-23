@@ -202,6 +202,8 @@ def _run_pipeline(job_id: str, v1_path: str, v2_path: str, keep_english: bool):
             "risk_level": change.get("risk_level", "medium"),
             "risk_note": change.get("risk_note", ""),
             "risk_categories": change.get("risk_categories", []),
+            "v1_snippet": change.get("v1_snippet", ""),
+            "v2_snippet": change.get("v2_snippet", ""),
             "clause_ref_v2": change.get("clause_ref_v2") or change.get("clause_ref_v1", ""),
             "attention_for": change.get("attention_for"),
             "is_favorable": change.get("is_favorable"),

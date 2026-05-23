@@ -1,5 +1,5 @@
 {% extends "base.html.jinja2" %}
-{% block title %}比对结果 — ContractLens{% endblock %}
+{% block title %}比对结果 — 契析{% endblock %}
 {% block content %}
 {% set summary = data.diff_summary %}
 {% set changes = data.changes %}
@@ -32,15 +32,15 @@
     </div>
     <div class="bg-red-50/60 rounded-2xl border border-red-200/60 p-5 text-center animate-fade-in stagger-2">
       <div class="text-4xl font-bold text-red-600 tracking-tight">{{ summary.high_risk }}</div>
-      <div class="text-xs text-red-500 mt-1.5 font-medium">高风险 <span class="text-red-400">24%</span></div>
+      <div class="text-xs text-red-500 mt-1.5 font-medium">高风险</div>
     </div>
     <div class="bg-amber-50/60 rounded-2xl border border-amber-200/60 p-5 text-center animate-fade-in stagger-3">
       <div class="text-4xl font-bold text-amber-600 tracking-tight">{{ summary.medium_risk }}</div>
-      <div class="text-xs text-amber-500 mt-1.5 font-medium">中风险 <span class="text-amber-400">62%</span></div>
+      <div class="text-xs text-amber-500 mt-1.5 font-medium">中风险</div>
     </div>
     <div class="bg-emerald-50/60 rounded-2xl border border-emerald-200/60 p-5 text-center animate-fade-in stagger-4">
       <div class="text-4xl font-bold text-emerald-600 tracking-tight">{{ summary.low_risk }}</div>
-      <div class="text-xs text-emerald-500 mt-1.5 font-medium">低风险 <span class="text-emerald-400">14%</span></div>
+      <div class="text-xs text-emerald-500 mt-1.5 font-medium">低风险</div>
     </div>
   </div>
 
@@ -64,7 +64,6 @@
 
   <!-- Filter bar -->
   <div class="sticky top-[60px] z-40 bg-white/90 backdrop-blur-md rounded-2xl border border-slate-200 p-4 mb-6 flex flex-wrap items-center gap-3 animate-fade-in stagger-6">
-    <!-- Risk filter -->
     <span class="text-[11px] text-slate-400 font-semibold uppercase tracking-wider">风险</span>
     <button @click="riskFilter = 'all'" class="px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-200"
             :class="riskFilter === 'all' ? 'bg-slate-800 text-white shadow-sm' : 'bg-slate-50 text-slate-500 hover:bg-slate-100'">全部</button>
@@ -87,13 +86,13 @@
             :class="typeFilter === 'removed' ? 'bg-red-600 text-white shadow-sm' : 'bg-red-50 text-red-600 hover:bg-red-100'">删除</button>
 
     <div class="flex-1"></div>
-    <span class="text-xs text-slate-400" x-text="'显示 ' + visibleCount + ' / {{ changes | length }} 条'">显示 {{ changes | length }} 条</span>
+    <span class="text-xs text-slate-400">显示 {{ changes | length }} 条</span>
   </div>
 
   <!-- Changes list -->
   <div class="space-y-3">
     {% for change in changes %}
-    <div class="bg-white rounded-2xl border border-slate-200 p-5 transition-all duration-200 hover:shadow-md hover:border-slate-300 animate-fade-in stagger-{{ (loop.index % 8) + 1 if loop.index < 9 else 8 }}"
+    <div class="bg-white rounded-2xl border border-slate-200 p-5 transition-all duration-200 hover:shadow-md animate-fade-in stagger-{{ (loop.index % 8) + 1 if loop.index < 9 else 8 }}"
          x-show="match('{{ change.risk_level }}', '{{ change.change_type }}')"
          x-transition:enter="transition ease-out duration-300"
          x-transition:enter-start="opacity-0 -translate-y-2"
@@ -111,10 +110,9 @@
         </div>
 
         <div class="flex-1 min-w-0">
-          <!-- Top row: id + type + risk -->
-          <div class="flex items-center gap-2 mb-1.5 flex-wrap">
+          <!-- Top row -->
+          <div class="flex items-center gap-2 mb-2 flex-wrap">
             <span class="text-[11px] font-mono text-slate-400">{{ change.id }}</span>
-
             {% if change.change_type == 'added' %}
             <span class="text-[11px] px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 font-medium">+ 新增</span>
             {% elif change.change_type == 'removed' %}
@@ -122,46 +120,56 @@
             {% else %}
             <span class="text-[11px] px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 font-medium">~ 修改</span>
             {% endif %}
-
             <span class="text-[11px] px-2 py-0.5 rounded-md font-medium
                          {% if change.risk_level == 'high' %}bg-red-50 text-red-700
                          {% elif change.risk_level == 'medium' %}bg-amber-50 text-amber-700
                          {% else %}bg-emerald-50 text-emerald-700{% endif %}">
               {{ {'high': '高风险', 'medium': '中风险', 'low': '低风险'}.get(change.risk_level, '') }}
             </span>
-
             {% if change.is_favorable == true %}
             <span class="text-[11px] text-emerald-600 font-medium">✓ 有利</span>
             {% elif change.is_favorable == false %}
             <span class="text-[11px] text-red-600 font-medium">✗ 不利</span>
             {% endif %}
+            {% if change.clause_ref_v2 or change.clause_ref_v1 %}
+            <span class="text-[10px] text-slate-400 font-mono ml-auto">{{ change.clause_ref_v2 or change.clause_ref_v1 }}</span>
+            {% endif %}
           </div>
 
           <!-- Brief -->
-          <p class="font-semibold text-slate-800 text-sm leading-relaxed mb-1.5">{{ change.brief }}</p>
+          <p class="font-semibold text-slate-800 text-sm mb-2">{{ change.brief }}</p>
 
-          <!-- Risk note -->
-          {% if change.risk_note %}
-          <div class="rounded-xl p-3 mb-2 text-sm leading-relaxed
-                      {% if change.risk_level == 'high' %}bg-red-50/80 text-red-700 border border-red-200/60
-                      {% elif change.risk_level == 'medium' %}bg-amber-50/80 text-amber-700 border border-amber-200/60
-                      {% else %}bg-slate-50 text-slate-600 border border-slate-200/60{% endif %}">
-            <span class="font-semibold mr-1">⚠</span>{{ change.risk_note }}
+          <!-- Side-by-side snippets -->
+          {% if change.v1_snippet or change.v2_snippet %}
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-2 mb-2">
+            <div class="bg-slate-50 rounded-lg p-2.5 border border-slate-100">
+              <div class="text-[10px] text-slate-400 font-semibold uppercase tracking-wider mb-1">V1 原文</div>
+              <div class="text-xs text-slate-600 leading-relaxed max-h-20 overflow-y-auto whitespace-pre-wrap">{{ change.v1_snippet or '（无对应条款）' }}</div>
+            </div>
+            <div class="bg-slate-50 rounded-lg p-2.5 border border-slate-100">
+              <div class="text-[10px] text-slate-400 font-semibold uppercase tracking-wider mb-1">V2 原文</div>
+              <div class="text-xs text-slate-600 leading-relaxed max-h-20 overflow-y-auto whitespace-pre-wrap">{{ change.v2_snippet or '（无对应条款）' }}</div>
+            </div>
           </div>
           {% endif %}
 
-          <!-- Meta footer -->
-          <div class="flex items-center gap-2 mt-2 flex-wrap">
-            {% if change.clause_ref_v2 %}
-            <span class="text-[11px] text-slate-400 font-mono">{{ change.clause_ref_v2 }}</span>
-            {% elif change.clause_ref_v1 %}
-            <span class="text-[11px] text-slate-400 font-mono">{{ change.clause_ref_v1 }}</span>
-            {% endif %}
+          <!-- Risk note -->
+          {% if change.risk_note %}
+          <div class="rounded-lg p-2.5 mb-2 text-xs leading-relaxed
+                      {% if change.risk_level == 'high' %}bg-red-50/80 text-red-700 border border-red-200/60
+                      {% elif change.risk_level == 'medium' %}bg-amber-50/80 text-amber-700 border border-amber-200/60
+                      {% else %}bg-slate-50 text-slate-600 border border-slate-200/60{% endif %}">
+            <span class="font-semibold">⚠ 风险提示：</span>{{ change.risk_note }}
+          </div>
+          {% endif %}
+
+          <!-- Meta -->
+          <div class="flex items-center gap-2 flex-wrap">
             {% for cat_name in change.risk_category_names %}
-            <span class="text-[11px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-md font-medium">{{ cat_name }}</span>
+            <span class="text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-md font-medium">{{ cat_name }}</span>
             {% endfor %}
             {% if change.attention_for %}
-            <span class="text-[11px] text-slate-400">👤 {{ change.attention_for }}</span>
+            <span class="text-[10px] text-slate-400">👤 {{ change.attention_for }}</span>
             {% endif %}
           </div>
         </div>
@@ -183,26 +191,6 @@ function resultsFilter() {
   return {
     riskFilter: 'all',
     typeFilter: 'all',
-    get visibleCount() {
-      let count = 0;
-      document.querySelectorAll('[x-show="match(').forEach(el => {
-        const r = el.getAttribute('x-show');
-        const riskArg = r.match(/'([^']*)'/)[1] || 'all';
-        const typeArg = r.match(/'([^']*)'\s*,\s*'([^']*)'/);
-        const risk = typeArg ? typeArg[1] : riskArg;
-        const type = typeArg ? typeArg[2] : 'all';
-        if ((this.riskFilter === 'all' || risk === this.riskFilter) &&
-            (this.typeFilter === 'all' || type === this.typeFilter)) {
-          // Element would be visible - but we're just counting
-          if (el.style.display !== 'none' || !el.getAttribute('style')) {
-            count++;
-          }
-        }
-      });
-      // Simpler: return a placeholder until filter changes
-      return count || this._manualCount;
-    },
-    _manualCount: {{ changes | length }},
     match(risk, type) {
       if (this.riskFilter !== 'all' && risk !== this.riskFilter) return false;
       if (this.typeFilter !== 'all' && type !== this.typeFilter) return false;

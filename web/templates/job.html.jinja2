@@ -1,5 +1,5 @@
 {% extends "base.html.jinja2" %}
-{% block title %}比对中 — ContractLens{% endblock %}
+{% block title %}比对中 — 契析{% endblock %}
 {% block content %}
 <div class="max-w-5xl mx-auto px-4 py-8" x-data="streamer('{{ job.id }}')">
   <!-- Progress header -->
@@ -74,14 +74,24 @@
                     }"
                     x-text="{'high':'高风险','medium':'中风险','low':'低风险'}[change.risk_level]"></span>
             </div>
-            <p class="text-sm font-medium text-slate-800 mb-1" x-text="change.brief"></p>
+            <p class="text-sm font-medium text-slate-800 mb-2" x-text="change.brief"></p>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-2 mb-2" x-show="change.v1_snippet || change.v2_snippet">
+              <div class="bg-slate-50 rounded-lg p-2 border border-slate-100" x-show="change.v1_snippet">
+                <div class="text-[10px] text-slate-400 font-semibold mb-0.5">V1 原文</div>
+                <div class="text-xs text-slate-600 whitespace-pre-wrap line-clamp-2" x-text="change.v1_snippet || ''"></div>
+              </div>
+              <div class="bg-slate-50 rounded-lg p-2 border border-slate-100" x-show="change.v2_snippet">
+                <div class="text-[10px] text-slate-400 font-semibold mb-0.5">V2 原文</div>
+                <div class="text-xs text-slate-600 whitespace-pre-wrap line-clamp-2" x-text="change.v2_snippet || ''"></div>
+              </div>
+            </div>
             <div x-show="change.risk_note" class="rounded-lg p-2 text-xs mb-1"
                  :class="{
                    'bg-red-50 text-red-700 border border-red-100': change.risk_level === 'high',
                    'bg-amber-50 text-amber-700 border border-amber-100': change.risk_level === 'medium',
                    'bg-slate-50 text-slate-600 border border-slate-100': change.risk_level === 'low'
                  }">
-              <span class="font-semibold">⚠</span> <span x-text="change.risk_note"></span>
+              <span class="font-semibold">⚠ 风险提示：</span> <span x-text="change.risk_note"></span>
             </div>
             <div class="flex items-center gap-2 text-[10px] text-slate-400 flex-wrap">
               <span x-show="change.clause_ref_v2" x-text="change.clause_ref_v2"></span>
