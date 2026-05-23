@@ -502,8 +502,13 @@ def _generate_pdf(job_id: str, ids: str):
         data = json.load(f)
 
     changes = data.get("changes", [])
+    # Normalize: ensure all changes have an id field
+    for i, c in enumerate(changes):
+        if "id" not in c:
+            c["id"] = f"diff-{i+1:03d}"
+
     confirmed_ids = [x for x in ids.split(",") if x] if ids else [c["id"] for c in changes]
-    filtered = [c for c in changes if c["id"] in confirmed_ids]
+    filtered = [c for c in changes if c.get("id") in confirmed_ids]
 
     from fpdf import FPDF
 
