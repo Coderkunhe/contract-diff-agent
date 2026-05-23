@@ -327,13 +327,15 @@ async def upload_files(v1_file: UploadFile = File(...), v2_file: UploadFile = Fi
     upload_dir = _PROJECT_ROOT / "data" / "uploads" / job_id
     upload_dir.mkdir(parents=True, exist_ok=True)
 
-    v1_path = upload_dir / "v1.pdf"
-    v2_path = upload_dir / "v2.pdf"
-    v1_path.write_bytes(files_data["v1"][1])
-    v2_path.write_bytes(files_data["v2"][1])
-
+    # Preserve original file extension for format detection
     v1_name = files_data["v1"][0]
     v2_name = files_data["v2"][0]
+    v1_ext = os.path.splitext(v1_name)[1].lower() or ".pdf"
+    v2_ext = os.path.splitext(v2_name)[1].lower() or ".pdf"
+    v1_path = upload_dir / f"v1{v1_ext}"
+    v2_path = upload_dir / f"v2{v2_ext}"
+    v1_path.write_bytes(files_data["v1"][1])
+    v2_path.write_bytes(files_data["v2"][1])
 
     # Create job with event queue for SSE streaming
     now = datetime.now(timezone.utc)
