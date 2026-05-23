@@ -1,5 +1,11 @@
+import os
 import pdfplumber
 from dataclasses import dataclass, field
+
+
+def _flatten_table(rows: list[list[str]]) -> str:
+    """Convert a list of cell rows to readable text."""
+    return "\n".join(" | ".join(str(c).strip() for c in row) for row in rows)
 
 
 @dataclass
@@ -19,6 +25,53 @@ class ContractDocument:
 
 
 def extract_contract(file_path: str, keep_english: bool = False) -> ContractDocument:
+    """Extract text from a contract file (PDF or DOCX).
+
+    Auto-detects format by file extension.
+    """
+    ext = os.path.splitext(file_path)[1].lower()
+    if ext == ".docx":
+        return _extract_docx(file_path, keep_english)
+    return _extract_pdf(file_path, keep_english)
+
+
+def _extract_docx(file_path: str, keep_english: bool = False) -> ContractDocument:
+    """Extract text and tables from a Word document."""
+    import docx
+
+    doc = docx.Document(file_path)
+    paragraphs: list[str] = []
+    tables_data: list[dict] = []
+
+    for para in doc.paragraphs:
+        if para.text.strip():
+            paragraphs.append(para.text)
+
+    for i, table in enumerate(doc.tables):
+        rows = []
+        for row in table.rows:
+            cells = [cell.text.strip() for cell in row.cells]
+            rows.append(cells)
+        tables_data.append({"page": i + 1, "raw_text": _flatten_table(rows)})
+
+    full_text = "\n".join(paragraphs)
+    bilingual_text = full_text
+
+    if not keep_english:
+        full_text = _strip_english(full_text)
+
+    # Create a single virtual page
+    page = ContractPage(page_num=1, text=full_text)
+    return ContractDocument(
+        file_path=file_path,
+        total_pages=1,
+        pages=[page],
+        full_text=full_text,
+        full_text_bilingual=bilingual_text,
+    )
+
+
+def _extract_pdf(file_path: str, keep_english: bool = False) -> ContractDocument:
     """Extract text and tables from a contract PDF.
 
     If keep_english is True, bilingual content is preserved as-is.

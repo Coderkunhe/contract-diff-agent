@@ -314,8 +314,8 @@ async def upload_files(v1_file: UploadFile = File(...), v2_file: UploadFile = Fi
     # Validate and read file contents once
     files_data: dict[str, tuple[str, bytes]] = {}
     for f, key in [(v1_file, "v1"), (v2_file, "v2")]:
-        if not f.filename or not f.filename.lower().endswith(".pdf"):
-            return JSONResponse({"error": f"{f.filename} 不是 PDF 文件"}, status_code=400)
+        if not f.filename or not f.filename.lower().endswith((".pdf", ".docx")):
+            return JSONResponse({"error": f"{f.filename} 不是 PDF/DOCX 文件"}, status_code=400)
         content = await f.read()
         if len(content) > 50 * 1024 * 1024:
             return JSONResponse({"error": f"{f.filename} 超过 50MB 限制"}, status_code=400)

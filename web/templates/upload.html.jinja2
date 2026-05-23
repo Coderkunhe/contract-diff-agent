@@ -25,7 +25,7 @@
            x-on:dragleave.prevent="$el.classList.remove('border-brand-400','bg-brand-50/30')"
            x-on:drop.prevent="handleDrop($event, 'v1')">
         <label class="cursor-pointer block p-8 sm:p-10">
-          <input type="file" name="v1_file" accept=".pdf" required
+          <input type="file" name="v1_file" accept=".pdf,.docx" required
                  @change="handleFile($event, 'v1')" class="hidden">
           <div class="flex items-center gap-5">
             <!-- Upload icon -->
@@ -42,7 +42,7 @@
                 <span class="text-xs text-slate-400">V1</span>
               </div>
               <p class="font-semibold text-slate-700 text-lg" x-text="v1Name || '点击选择或拖拽 PDF 文件'">点击选择或拖拽 PDF 文件</p>
-              <p class="text-sm text-slate-400 mt-0.5" x-show="!v1Name">支持 .pdf 格式，最大 50MB</p>
+              <p class="text-sm text-slate-400 mt-0.5" x-show="!v1Name">支持 .pdf / .docx 格式</p>
               <p class="text-sm text-brand-600 mt-0.5" x-show="v1Name" x-text="'已选择: ' + v1Name"></p>
             </div>
           </div>
@@ -67,7 +67,7 @@
            x-on:dragleave.prevent="$el.classList.remove('border-brand-400','bg-brand-50/30')"
            x-on:drop.prevent="handleDrop($event, 'v2')">
         <label class="cursor-pointer block p-8 sm:p-10">
-          <input type="file" name="v2_file" accept=".pdf" required
+          <input type="file" name="v2_file" accept=".pdf,.docx" required
                  @change="handleFile($event, 'v2')" class="hidden">
           <div class="flex items-center gap-5">
             <div class="flex-shrink-0 w-14 h-14 rounded-2xl flex items-center justify-center transition-all duration-300"
@@ -83,7 +83,7 @@
                 <span class="text-xs text-slate-400">V2</span>
               </div>
               <p class="font-semibold text-slate-700 text-lg" x-text="v2Name || '点击选择或拖拽 PDF 文件'">点击选择或拖拽 PDF 文件</p>
-              <p class="text-sm text-slate-400 mt-0.5" x-show="!v2Name">支持 .pdf 格式，最大 50MB</p>
+              <p class="text-sm text-slate-400 mt-0.5" x-show="!v2Name">支持 .pdf / .docx 格式</p>
               <p class="text-sm text-brand-600 mt-0.5" x-show="v2Name" x-text="'已选择: ' + v2Name"></p>
             </div>
           </div>
@@ -138,7 +138,7 @@ function uploader() {
     },
     handleDrop(event, side) {
       const f = event.dataTransfer.files[0];
-      if (f && f.name.toLowerCase().endsWith('.pdf')) {
+      if (f && (f.name.toLowerCase().endsWith('.pdf') || f.name.toLowerCase().endsWith('.docx'))) {
         if (side === 'v1') this.v1Name = f.name;
         else this.v2Name = f.name;
         // Set the file on the hidden input
