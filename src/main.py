@@ -25,32 +25,41 @@ def _load_env():
 
 
 def _run_v03(args, v1, v2, api_key: str, base_url: str, model: str,
-             on_change: callable = None) -> dict:
+             on_change: callable = None, on_progress: callable = None) -> dict:
     """Full pipeline: clause tree → align → identify → validate → classify.
 
     Args:
         on_change: Optional callback(change_dict) for SSE streaming.
+        on_progress: Optional callback(status, progress, step_label, message).
         args.thorough: If True, separate ③ diff and ⑤ risk for cross-validation.
     """
     from .clause_tree import build_clause_tree
     from .clause_aligner import align_clauses
     from .diff_identifier import identify_changes
 
-    print(f"\n① 构建条款树...")
+    def _progress(status, progress, step, msg=""):
+        print(f"\n{msg or step}")
+        if on_progress:
+            try:
+                on_progress(status, progress, step, msg)
+            except Exception:
+                pass
+
+    _progress("tree_building", 12, "构建条款树", "正在解析条款结构...")
     tree1 = build_clause_tree(v1.full_text)
     tree2 = build_clause_tree(v2.full_text)
     print(f"   V1: {len(tree1.clauses)} L1 章节, {sum(len(c.children) for c in tree1.clauses)} L2 子条款")
     print(f"   V2: {len(tree2.clauses)} L1 章节, {sum(len(c.children) for c in tree2.clauses)} L2 子条款")
 
-    print(f"\n② 条款对齐...")
+    _progress("aligning", 20, "条款对齐", "匹配两个版本的条款结构...")
     diff_map = align_clauses(tree1, tree2)
     matched = sum(1 for p in diff_map.pairs if p.alignment_type == "match")
     print(f"   匹配: {matched} 对, 新增: {len(diff_map.v2_unmatched)}, 删除: {len(diff_map.v1_unmatched)}")
 
     thorough = getattr(args, "thorough", False)
 
+    _progress("identifying", 30, "LLM 逐条比对差异", "AI 正在对比两个版本的条款内容...")
     if thorough:
-        print(f"\n③ LLM 差异识别 (严谨模式: 不含风险分类)...")
         raw_changes, _ = identify_changes(
             diff_map, api_key=api_key, model=model, base_url=base_url,
             on_change=on_change, skip_risk=True,
@@ -79,7 +88,7 @@ def _run_v03(args, v1, v2, api_key: str, base_url: str, model: str,
     # L2 validation (fast, always runs)
     from .validator import validate_changes as validate_l3
     from .validator import _l2_check
-    print(f"\n④ 校验...")
+    _progress("validating", 55, "校验差异", "正在验证差异真实性...")
     if args.validate:
         validated = validate_l3(
             raw_changes,

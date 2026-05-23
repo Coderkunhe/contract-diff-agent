@@ -193,6 +193,13 @@ def _run_pipeline(job_id: str, v1_path: str, v2_path: str, keep_english: bool):
     if not job:
         return
 
+    # Callback for streaming progress
+    def _on_progress(status, progress, step, msg):
+        _send_event(job_id, "progress", {
+            "status": status, "progress": progress,
+            "step": step, "message": msg,
+        })
+
     # Callback for streaming changes
     def _on_change(change: dict):
         _send_event(job_id, "change", {
@@ -241,6 +248,7 @@ def _run_pipeline(job_id: str, v1_path: str, v2_path: str, keep_english: bool):
                 base_url=config.base_url,
                 model=config.model,
                 on_change=_on_change,
+                on_progress=_on_progress,
             )
         finally:
             sys.stdout = old_stdout
