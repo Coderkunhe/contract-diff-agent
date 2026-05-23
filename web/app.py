@@ -443,6 +443,7 @@ def results_page(job_id: str, request: Request):
             cat_map=cat_map,
             sorted_freq=sorted_freq,
             max_freq_val=max_freq_val,
+            confirmed_ids=[],
         )
     except Exception as e:
         # Fallback: render a simple JSON dump page

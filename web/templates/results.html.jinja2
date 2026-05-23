@@ -63,7 +63,7 @@
   </div>
 
   <!-- Filter bar -->
-  <div class="sticky top-[60px] z-40 bg-white/90 backdrop-blur-md rounded-2xl border border-slate-200 p-4 mb-6 flex flex-wrap items-center gap-3 animate-fade-in stagger-6">
+  <div class="sticky top-[58px] z-40 bg-white/90 backdrop-blur-md rounded-2xl border border-slate-200 p-4 mb-6 flex flex-wrap items-center gap-3 animate-fade-in stagger-6">
     <span class="text-[11px] text-slate-400 font-semibold uppercase tracking-wider">风险</span>
     <button @click="riskFilter = 'all'" class="px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-200"
             :class="riskFilter === 'all' ? 'bg-slate-800 text-white shadow-sm' : 'bg-slate-50 text-slate-500 hover:bg-slate-100'">全部</button>
@@ -100,11 +100,12 @@
          :class="'{{ change.risk_level }}' === 'high' ? 'border-l-[3px] border-l-red-400' : ''">
       <div class="flex items-start gap-4">
         <!-- Confirm toggle -->
-        <div class="flex-shrink-0 pt-0.5">
-          <button @click="toggle('{{ change.id }}')"
-                  class="w-8 h-8 rounded-xl flex items-center justify-center text-sm font-bold border-2 transition-all duration-200"
-                  :class="confirmed['{{ change.id }}'] ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-slate-200 text-slate-300 hover:border-emerald-300 hover:text-emerald-500'"
-                  x-text="confirmed['{{ change.id }}'] ? '✓' : '○'"></button>
+        <div class="flex-shrink-0 pt-0.5 text-center" x-data="{ ok: false }">
+          <button @click="ok = !ok; $dispatch('confirm', {id: '{{ change.id }}', value: ok})"
+                  class="px-3 py-1.5 rounded-lg text-xs font-medium border-2 transition-all duration-200"
+                  :class="ok ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-slate-200 text-slate-400 hover:border-emerald-300 hover:text-emerald-500'">
+            <span x-text="ok ? '✓ 已确认' : '确认'"></span>
+          </button>
         </div>
         <!-- Risk badge -->
         <div class="flex-shrink-0 pt-0.5">
@@ -221,24 +222,28 @@ function resultsPage() {
   return {
     riskFilter: 'all',
     typeFilter: 'all',
-    confirmed: {},
+    confirmed: {{ confirmed_ids | tojson }},
     get totalChanges() { return {{ changes | length }}; },
-    get confirmedCount() { return Object.values(this.confirmed).filter(v => v).length; },
+    get confirmedCount() { return this.confirmed.length; },
     get confirmPct() { return this.totalChanges ? Math.round(this.confirmedCount / this.totalChanges * 100) : 0; },
 
     init() {
-      // Load confirmed state from localStorage
       const jobId = window.location.pathname.split('/').pop();
       const saved = localStorage.getItem('confirmed_' + jobId);
       if (saved) {
         try { this.confirmed = JSON.parse(saved); } catch(e) {}
       }
-    },
 
-    toggle(id) {
-      this.confirmed[id] = !this.confirmed[id];
-      const jobId = window.location.pathname.split('/').pop();
-      localStorage.setItem('confirmed_' + jobId, JSON.stringify(this.confirmed));
+      // Listen for confirm events from individual cards
+      window.addEventListener('confirm', (e) => {
+        const { id, value } = e.detail;
+        if (value) {
+          if (!this.confirmed.includes(id)) this.confirmed.push(id);
+        } else {
+          this.confirmed = this.confirmed.filter(x => x !== id);
+        }
+        localStorage.setItem('confirmed_' + jobId, JSON.stringify(this.confirmed));
+      });
     },
 
     match(risk, type) {
@@ -248,28 +253,25 @@ function resultsPage() {
     },
 
     downloadReport() {
-      const confirmedIds = Object.entries(this.confirmed).filter(([k,v]) => v).map(([k]) => k);
-      if (!confirmedIds.length) return;
-
+      if (!this.confirmed.length) return;
+      const ids = this.confirmed;
       fetch('/api/results/' + window.location.pathname.split('/').pop() + '/json')
         .then(r => r.json())
         .then(data => {
           const filtered = {
             ...data,
-            changes: data.changes.filter(c => confirmedIds.includes(c.id)),
+            changes: data.changes.filter(c => ids.includes(c.id)),
             confirmation: {
-              confirmed_count: confirmedIds.length,
+              confirmed_count: ids.length,
               total: data.changes.length,
               confirmed_at: new Date().toISOString(),
             }
           };
           const blob = new Blob([JSON.stringify(filtered, null, 2)], {type: 'application/json'});
-          const url = URL.createObjectURL(blob);
           const a = document.createElement('a');
-          a.href = url;
+          a.href = URL.createObjectURL(blob);
           a.download = 'contract-diff-confirmed.json';
           a.click();
-          URL.revokeObjectURL(url);
         });
     },
   }
