@@ -413,14 +413,38 @@ def results_page(job_id: str, request: Request):
     sorted_freq = sorted(freq.items(), key=lambda x: x[1], reverse=True)[:8]
     max_freq_val = sorted_freq[0][1] if sorted_freq else 1
 
-    return _render(
-        "results.html.jinja2",
-        job=job,
-        data=data,
-        cat_map=cat_map,
-        sorted_freq=sorted_freq,
-        max_freq_val=max_freq_val,
-    )
+    try:
+        return _render(
+            "results.html.jinja2",
+            job=job,
+            data=data,
+            cat_map=cat_map,
+            sorted_freq=sorted_freq,
+            max_freq_val=max_freq_val,
+        )
+    except Exception as e:
+        # Fallback: render a simple JSON dump page
+        summary = data.get("diff_summary", {})
+        changes = data.get("changes", [])
+        html = f"""<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8">
+<title>比对结果</title><script src="https://cdn.tailwindcss.com"></script></head>
+<body class="bg-slate-50 p-6 font-sans"><div class="max-w-4xl mx-auto">
+<h1 class="text-2xl font-bold mb-4">比对结果</h1>
+<p class="text-red-600 mb-4">模板渲染失败，显示简化版: {str(e)[:200]}</p>
+<div class="grid grid-cols-4 gap-3 mb-4">
+<div class="bg-white rounded-xl p-4 text-center"><div class="text-2xl font-bold">{summary.get('total_changes','?')}</div><div class="text-xs text-slate-400">总差异</div></div>
+<div class="bg-red-50 rounded-xl p-4 text-center"><div class="text-2xl font-bold text-red-600">{summary.get('high_risk','?')}</div><div class="text-xs text-red-500">高风险</div></div>
+<div class="bg-amber-50 rounded-xl p-4 text-center"><div class="text-2xl font-bold text-amber-600">{summary.get('medium_risk','?')}</div><div class="text-xs text-amber-500">中风险</div></div>
+<div class="bg-green-50 rounded-xl p-4 text-center"><div class="text-2xl font-bold text-green-600">{summary.get('low_risk','?')}</div><div class="text-xs text-green-500">低风险</div></div>
+</div>"""
+        for c in changes[:50]:
+            html += f"""<div class="bg-white rounded-lg border border-slate-200 p-3 mb-2">
+<span class="text-sm font-medium">{c.get('brief','')}</span>
+<span class="text-xs text-slate-400 ml-2">[{c.get('risk_level','')}]</span>
+<div class="text-xs text-red-600 mt-1">{c.get('risk_note','')[:200]}</div>
+</div>"""
+        html += f"<p class='text-xs text-slate-400 mt-4'>仅显示前 50 条，共 {len(changes)} 条</p></div></body></html>"
+        return HTMLResponse(html, status_code=200)
 
 
 @app.get("/api/results/{job_id}/json")
