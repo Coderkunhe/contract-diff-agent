@@ -507,16 +507,19 @@ async def job_stream(job_id: str):
         return JSONResponse({"error": "no stream"}, status_code=400)
 
     async def event_generator():
+        import asyncio
         while True:
             try:
-                msg = eq.get(timeout=30)
-                event_type = msg.get("event", "message")
-                data = json.dumps(msg.get("data", {}), ensure_ascii=False)
-                yield f"event: {event_type}\ndata: {data}\n\n"
-                if event_type in ("done", "error"):
-                    break
+                msg = eq.get_nowait()
             except queue.Empty:
-                yield f"event: ping\ndata: {{}}\n\n"
+                await asyncio.sleep(0.3)
+                yield "event: ping\ndata: {}\n\n"
+                continue
+            event_type = msg.get("event", "message")
+            data = json.dumps(msg.get("data", {}), ensure_ascii=False)
+            yield f"event: {event_type}\ndata: {data}\n\n"
+            if event_type in ("done", "error"):
+                break
 
     return StreamingResponse(
         event_generator(),

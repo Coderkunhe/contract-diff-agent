@@ -63,7 +63,7 @@
   </div>
 
   <!-- Filter bar -->
-  <div class="sticky top-[58px] z-40 bg-white/90 backdrop-blur-md rounded-2xl border border-slate-200 p-4 mb-6 flex flex-wrap items-center gap-3 animate-fade-in stagger-6">
+  <div class="sticky top-14 z-40 bg-white/90 backdrop-blur-md rounded-2xl border border-slate-200 p-4 mb-6 flex flex-wrap items-center gap-3 animate-fade-in stagger-6">
     <span class="text-[11px] text-slate-400 font-semibold uppercase tracking-wider">风险</span>
     <button @click="riskFilter = 'all'" class="px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-200"
             :class="riskFilter === 'all' ? 'bg-slate-800 text-white shadow-sm' : 'bg-slate-50 text-slate-500 hover:bg-slate-100'">全部</button>
@@ -175,8 +175,9 @@
               <span class="text-[10px] text-slate-400">👤 {{ change.attention_for }}</span>
               {% endif %}
             </div>
-            <div class="flex-shrink-0" x-data="{ ok: false }" x-init="ok = $parent.confirmed.includes('{{ change.id }}')">
-              <button @click="ok = !ok; $parent.toggleConfirm('{{ change.id }}', ok)"
+            <div class="flex-shrink-0" x-data="{ ok: false }"
+                 x-init="const saved = localStorage.getItem('confirmed_' + window.location.pathname.split('/').pop()); const ids = saved ? JSON.parse(saved) : []; ok = ids.includes('{{ change.id }}')">
+              <button @click="ok = !ok; $dispatch('confirm-change', {id: '{{ change.id }}', value: ok})"
                       class="px-3 py-1.5 rounded-lg text-xs font-medium border-2 transition-all duration-200 min-w-[72px]"
                       :class="ok ? 'bg-emerald-500 border-emerald-500 text-white shadow-sm' : 'border-amber-300 text-amber-500 hover:border-emerald-400 hover:text-emerald-600'">
                 <span x-text="ok ? '✓ 已确认' : '待确认'"></span>
@@ -234,16 +235,17 @@ function resultsPage() {
       if (saved) {
         try { this.confirmed = JSON.parse(saved); } catch(e) {}
       }
-    },
-
-    toggleConfirm(id, ok) {
-      if (ok) {
-        if (!this.confirmed.includes(id)) this.confirmed.push(id);
-      } else {
-        this.confirmed = this.confirmed.filter(x => x !== id);
-      }
-      const jobId = window.location.pathname.split('/').pop();
-      localStorage.setItem('confirmed_' + jobId, JSON.stringify(this.confirmed));
+      // Listen for confirmation events from card buttons
+      const self = this;
+      document.addEventListener('confirm-change', function(e) {
+        const { id, value } = e.detail;
+        if (value) {
+          if (!self.confirmed.includes(id)) self.confirmed.push(id);
+        } else {
+          self.confirmed = self.confirmed.filter(x => x !== id);
+        }
+        localStorage.setItem('confirmed_' + jobId, JSON.stringify(self.confirmed));
+      });
     },
 
     match(risk, type) {
