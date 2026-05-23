@@ -179,10 +179,10 @@
               {% endif %}
             </div>
             <div class="flex-shrink-0">
-              <button @click="$parent.toggleOne('{{ change.id }}')"
+              <button @click="toggleOne('{{ change.id }}')"
                       class="px-3 py-1.5 rounded-lg text-xs font-medium border-2 transition-all duration-200 min-w-[72px]"
-                      :class="$parent.isConfirmed('{{ change.id }}') ? 'bg-emerald-500 border-emerald-500 text-white shadow-sm' : 'border-amber-300 text-amber-500 hover:border-emerald-400 hover:text-emerald-600'">
-                <span x-text="$parent.isConfirmed('{{ change.id }}') ? '✓ 已确认' : '待确认'"></span>
+                      :class="isConfirmed('{{ change.id }}') ? 'bg-emerald-500 border-emerald-500 text-white shadow-sm' : 'border-amber-300 text-amber-500 hover:border-emerald-400 hover:text-emerald-600'">
+                <span x-text="isConfirmed('{{ change.id }}') ? '✓ 已确认' : '待确认'"></span>
               </button>
             </div>
           </div>
