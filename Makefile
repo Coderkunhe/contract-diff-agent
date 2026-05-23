@@ -1,4 +1,4 @@
-.PHONY: install run test clean web web-install
+.PHONY: install run run-offline test clean web web-install
 
 VENV := .venv
 PYTHON := $(VENV)/bin/python
@@ -9,19 +9,21 @@ install:
 	@echo "==> Installing dependencies..."
 	$(PIP) install --upgrade pip -q
 	$(PIP) install -e . -q
-	$(PIP) install fastapi "uvicorn[standard]" python-multipart jinja2 -q
+	$(PIP) install fastapi "uvicorn[standard]" python-multipart jinja2 fpdf2 -q
 	@echo "==> Done. Run 'source .venv/bin/activate' or use 'make run'"
 
 run:
 	@test -f .env || { echo "ERROR: .env not found. Copy .env.example or create one with ANTHROPIC_API_KEY"; exit 1; }
 	$(PYTHON) -m src.main docs/天猫服务协议2015\(2\).pdf docs/天猫服务协议2026\(2\).pdf -o data/diff_result.json
 
+run-offline:
+	$(PYTHON) -m src.main docs/天猫服务协议2015\(2\).pdf docs/天猫服务协议2026\(2\).pdf --offline -o data/diff_result.json
+
 run-validate:
 	@test -f .env || { echo "ERROR: .env not found."; exit 1; }
 	$(PYTHON) -m src.main docs/天猫服务协议2015\(2\).pdf docs/天猫服务协议2026\(2\).pdf -o data/diff_result.json --validate
 
 web:
-	@test -f .env || { echo "ERROR: .env not found."; exit 1; }
 	$(PYTHON) -m web.app
 
 test:
