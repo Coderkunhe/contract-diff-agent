@@ -1,0 +1,18 @@
+[project]
+name = "contract-diff-agent"
+version = "0.4.0"
+description = "风控合规 Agent — 合同差异比对与风险提示"
+requires-python = ">=3.12"
+dependencies = [
+    "pdfplumber>=0.11.0",
+    "openai>=2.0.0",
+    "python-dotenv>=1.0.0",
+    "json-repair>=0.50.0",
+]
+
+[project.scripts]
+contract-diff = "src.main:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

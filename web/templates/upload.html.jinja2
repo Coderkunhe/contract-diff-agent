@@ -1,0 +1,144 @@
+{% extends "base.html.jinja2" %}
+{% block title %}上传合同 — ContractLens{% endblock %}
+{% block content %}
+<div class="max-w-3xl mx-auto px-4 py-12 sm:py-20">
+  <!-- Hero -->
+  <div class="text-center mb-10 animate-fade-in">
+    <h1 class="text-3xl sm:text-4xl font-bold text-slate-900 tracking-tight mb-3">
+      合同版本智能比对
+    </h1>
+    <p class="text-slate-500 text-base sm:text-lg max-w-lg mx-auto leading-relaxed">
+      上传两份合同 PDF，AI 自动识别差异并生成通俗风险提示
+    </p>
+  </div>
+
+  <!-- Upload form -->
+  <form action="/upload" method="post" enctype="multipart/form-data"
+        x-data="uploader()" class="space-y-5">
+
+    <!-- V1 card -->
+    <div class="animate-fade-in stagger-1">
+      <div class="relative bg-white rounded-2xl border border-slate-200 hover:border-brand-300 transition-all duration-300 overflow-hidden group"
+           :class="v1Name ? 'border-brand-400 shadow-sm shadow-brand-50' : ''"
+           x-on:dragover.prevent="$el.classList.add('border-brand-400','bg-brand-50/30')"
+           x-on:dragleave.prevent="$el.classList.remove('border-brand-400','bg-brand-50/30')"
+           x-on:drop.prevent="handleDrop($event, 'v1')">
+        <label class="cursor-pointer block p-8 sm:p-10">
+          <input type="file" name="v1_file" accept=".pdf" required
+                 @change="handleFile($event, 'v1')" class="hidden">
+          <div class="flex items-center gap-5">
+            <!-- Upload icon -->
+            <div class="flex-shrink-0 w-14 h-14 rounded-2xl flex items-center justify-center transition-all duration-300"
+                 :class="v1Name ? 'bg-brand-50 text-brand-600' : 'bg-slate-100 text-slate-400 group-hover:bg-brand-50 group-hover:text-brand-500'">
+              <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                      d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+              </svg>
+            </div>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2 mb-1">
+                <span class="text-xs font-semibold uppercase tracking-wider text-slate-400 bg-slate-100 px-2 py-0.5 rounded-md">旧版本</span>
+                <span class="text-xs text-slate-400">V1</span>
+              </div>
+              <p class="font-semibold text-slate-700 text-lg" x-text="v1Name || '点击选择或拖拽 PDF 文件'">点击选择或拖拽 PDF 文件</p>
+              <p class="text-sm text-slate-400 mt-0.5" x-show="!v1Name">支持 .pdf 格式，最大 50MB</p>
+              <p class="text-sm text-brand-600 mt-0.5" x-show="v1Name" x-text="'已选择: ' + v1Name"></p>
+            </div>
+          </div>
+        </label>
+      </div>
+    </div>
+
+    <!-- Swap arrow -->
+    <div class="flex justify-center animate-fade-in stagger-2">
+      <div class="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center">
+        <svg class="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14l-7 7m0 0l-7-7m7 7V3"/>
+        </svg>
+      </div>
+    </div>
+
+    <!-- V2 card -->
+    <div class="animate-fade-in stagger-3">
+      <div class="relative bg-white rounded-2xl border border-slate-200 hover:border-brand-300 transition-all duration-300 overflow-hidden"
+           :class="v2Name ? 'border-brand-400 shadow-sm shadow-brand-50' : ''"
+           x-on:dragover.prevent="$el.classList.add('border-brand-400','bg-brand-50/30')"
+           x-on:dragleave.prevent="$el.classList.remove('border-brand-400','bg-brand-50/30')"
+           x-on:drop.prevent="handleDrop($event, 'v2')">
+        <label class="cursor-pointer block p-8 sm:p-10">
+          <input type="file" name="v2_file" accept=".pdf" required
+                 @change="handleFile($event, 'v2')" class="hidden">
+          <div class="flex items-center gap-5">
+            <div class="flex-shrink-0 w-14 h-14 rounded-2xl flex items-center justify-center transition-all duration-300"
+                 :class="v2Name ? 'bg-brand-50 text-brand-600' : 'bg-slate-100 text-slate-400 group-hover:bg-brand-50 group-hover:text-brand-500'">
+              <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                      d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+              </svg>
+            </div>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2 mb-1">
+                <span class="text-xs font-semibold uppercase tracking-wider text-brand-600 bg-brand-50 px-2 py-0.5 rounded-md">新版本</span>
+                <span class="text-xs text-slate-400">V2</span>
+              </div>
+              <p class="font-semibold text-slate-700 text-lg" x-text="v2Name || '点击选择或拖拽 PDF 文件'">点击选择或拖拽 PDF 文件</p>
+              <p class="text-sm text-slate-400 mt-0.5" x-show="!v2Name">支持 .pdf 格式，最大 50MB</p>
+              <p class="text-sm text-brand-600 mt-0.5" x-show="v2Name" x-text="'已选择: ' + v2Name"></p>
+            </div>
+          </div>
+        </label>
+      </div>
+    </div>
+
+    <!-- Submit -->
+    <div class="pt-2 animate-fade-in stagger-4">
+      <button type="submit"
+              :disabled="!v1Name || !v2Name"
+              class="w-full py-4 rounded-2xl font-semibold text-lg transition-all duration-300 flex items-center justify-center gap-2"
+              :class="v1Name && v2Name
+                ? 'bg-slate-900 text-white hover:bg-slate-800 shadow-lg shadow-slate-200 hover:shadow-xl hover:shadow-slate-300 hover:-translate-y-0.5'
+                : 'bg-slate-100 text-slate-400 cursor-not-allowed'">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+        </svg>
+        开始智能比对
+      </button>
+      <p class="text-center text-xs text-slate-400 mt-3">
+        预计耗时 2–5 分钟 · AI 深度分析中请耐心等待
+      </p>
+    </div>
+  </form>
+</div>
+
+<script>
+function uploader() {
+  return {
+    v1Name: '',
+    v2Name: '',
+    handleFile(event, side) {
+      const f = event.target.files[0];
+      if (f) {
+        if (side === 'v1') this.v1Name = f.name;
+        else this.v2Name = f.name;
+      }
+    },
+    handleDrop(event, side) {
+      const f = event.dataTransfer.files[0];
+      if (f && f.name.toLowerCase().endsWith('.pdf')) {
+        if (side === 'v1') this.v1Name = f.name;
+        else this.v2Name = f.name;
+        // Set the file on the hidden input
+        const input = event.target.closest('label').querySelector('input[type=file]');
+        if (input) {
+          const dt = new DataTransfer();
+          dt.items.add(f);
+          input.files = dt.files;
+        }
+      }
+      event.target.classList.remove('border-brand-400','bg-brand-50/30');
+    }
+  }
+}
+</script>
+{% endblock %}

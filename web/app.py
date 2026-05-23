@@ -1,0 +1,347 @@
+"""FastAPI web app for the Contract Diff Agent.
+
+Usage:
+    python -m web.app
+    make web
+"""
+
+import argparse
+import io
+import json
+import os
+import re
+import sys
+import threading
+import time
+import uuid
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+from fastapi import FastAPI, File, Form, Request, UploadFile
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
+
+# Ensure project root is on path
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(_PROJECT_ROOT))
+
+from src.config import AppConfig
+from src.pdf_extractor import extract_contract
+from src.main import _run_v03
+
+# ── App ──────────────────────────────────────────────────────────
+app = FastAPI(title="合同差异比对工具", version="0.4.0")
+templates_dir = Path(__file__).resolve().parent / "templates"
+
+# ── Config ────────────────────────────────────────────────────────
+config = AppConfig.from_env()
+_LLM_ENABLED = bool(config.api_key)
+
+# ── Thread pool ───────────────────────────────────────────────────
+_executor = ThreadPoolExecutor(max_workers=2)
+
+# ── Job store ─────────────────────────────────────────────────────
+_JOBS: dict[str, dict] = {}
+_JOBS_LOCK = threading.Lock()
+_MAX_JOBS = 20
+
+_JOB_STATUS_STEPS = {
+    "queued": (0, "排队中"),
+    "extracting": (5, "提取 PDF 文本"),
+    "tree_building": (10, "构建条款树"),
+    "aligning": (20, "对齐条款"),
+    "identifying": (30, "LLM 识别差异"),
+    "validating": (55, "校验变化"),
+    "classifying": (75, "风险分类"),
+    "done": (100, "完成"),
+    "error": (0, "出错"),
+}
+
+
+def _lr_evict():
+    """Remove oldest job if we have too many."""
+    with _JOBS_LOCK:
+        if len(_JOBS) >= _MAX_JOBS:
+            oldest = min(_JOBS.keys(), key=lambda k: _JOBS[k].get("created_at", datetime.min))
+            del _JOBS[oldest]
+
+
+# ── Progress capture ─────────────────────────────────────────────
+class JobProgressIO(io.StringIO):
+    """Capture pipeline stdout and update job progress in real-time."""
+
+    def __init__(self, job_id: str, real_stdout):
+        super().__init__()
+        self._job_id = job_id
+        self._real = real_stdout
+        self._line_buf = ""
+
+    def write(self, s: str):
+        self._real.write(s)
+        self._real.flush()
+        super().write(s)
+        self._line_buf += s
+        while "\n" in self._line_buf:
+            line, self._line_buf = self._line_buf.split("\n", 1)
+            self._parse_line(line.strip())
+
+    def flush(self):
+        self._real.flush()
+
+    def _parse_line(self, line: str):
+        if not line:
+            return
+        jid = self._job_id
+        now = datetime.now(timezone.utc)
+        # Stage detection
+        if "①" in line or "构建条款树" in line:
+            _update_job_inner(jid, status="tree_building", progress=10, message=line, timestamp=now)
+        elif "②" in line or "条款对齐" in line:
+            _update_job_inner(jid, status="aligning", progress=20, message=line, timestamp=now)
+        elif "③" in line or "差异识别" in line:
+            _update_job_inner(jid, status="identifying", progress=30, message=line, timestamp=now)
+        elif "④" in line or "校验" in line:
+            _update_job_inner(jid, status="validating", progress=55, message=line, timestamp=now)
+        elif "⑤" in line or "风险分类" in line:
+            _update_job_inner(jid, status="classifying", progress=75, message=line, timestamp=now)
+        # Sub-stage progress
+        m = re.search(r"校验进度:\s*(\d+)/(\d+)", line)
+        if m:
+            cur, total = int(m.group(1)), int(m.group(2))
+            pct = 55 + int(20 * cur / total) if total else 55
+            _update_job_inner(jid, progress=pct, message=line, timestamp=now)
+        m = re.search(r"batch\s+(\d+)/(\d+)", line)
+        if m:
+            cur, total = int(m.group(1)), int(m.group(2))
+            pct = 75 + int(25 * cur / total) if total else 75
+            _update_job_inner(jid, progress=pct, message=line, timestamp=now)
+        # Accumulate log
+        _append_log_inner(jid, line)
+        _update_job_inner(jid, message=line, timestamp=now)
+
+
+def _update_job_inner(job_id: str, **kwargs):
+    with _JOBS_LOCK:
+        if job_id in _JOBS:
+            j = _JOBS[job_id]
+            for k, v in kwargs.items():
+                if k == "timestamp" or k == "progress" or k == "message" or k == "status":
+                    pass  # handled below
+            if "status" in kwargs:
+                j["status"] = kwargs["status"]
+                if kwargs["status"] in _JOB_STATUS_STEPS:
+                    pct, label = _JOB_STATUS_STEPS[kwargs["status"]]
+                    if "progress" not in kwargs:
+                        j["progress"] = pct
+                    j["step_label"] = label
+            if "progress" in kwargs:
+                j["progress"] = kwargs["progress"]
+            if "message" in kwargs:
+                j["message"] = kwargs["message"]
+
+
+def _append_log_inner(job_id: str, line: str):
+    with _JOBS_LOCK:
+        if job_id in _JOBS:
+            logs = _JOBS[job_id].setdefault("log_lines", [])
+            logs.append(line)
+            if len(logs) > 50:
+                logs[:] = logs[-50:]
+
+
+# ── Pipeline worker ──────────────────────────────────────────────
+def _run_pipeline(job_id: str, v1_path: str, v2_path: str, keep_english: bool):
+    """Run pipeline in background thread."""
+    with _JOBS_LOCK:
+        job = _JOBS.get(job_id)
+    if not job:
+        return
+
+    try:
+        now = datetime.now(timezone.utc)
+        _update_job_inner(job_id, status="extracting", progress=5,
+                          message="正在提取 PDF 文本...", timestamp=now)
+        v1 = extract_contract(v1_path, keep_english=keep_english)
+        v2 = extract_contract(v2_path, keep_english=keep_english)
+
+        fake_args = argparse.Namespace(validate=False)
+
+        # Capture stdout for progress tracking
+        tracker = JobProgressIO(job_id, sys.stdout)
+        old_stdout = sys.stdout
+        sys.stdout = tracker
+
+        try:
+            result = _run_v03(
+                fake_args, v1, v2,
+                api_key=config.api_key,
+                base_url=config.base_url,
+                model=config.model,
+            )
+        finally:
+            sys.stdout = old_stdout
+
+        # Save result
+        result_dir = _PROJECT_ROOT / "data" / "jobs"
+        result_dir.mkdir(parents=True, exist_ok=True)
+        result_path = result_dir / f"{job_id}.json"
+        with open(result_path, "w", encoding="utf-8") as f:
+            json.dump(result, f, ensure_ascii=False, indent=2)
+
+        now = datetime.now(timezone.utc)
+        _update_job_inner(job_id, status="done", progress=100,
+                          result_path=str(result_path),
+                          message="比对完成", timestamp=now)
+
+    except Exception as e:
+        now = datetime.now(timezone.utc)
+        _update_job_inner(job_id, status="error",
+                          error=str(e), message=f"错误: {e}", timestamp=now)
+
+
+# ── Jinja2 template helpers ──────────────────────────────────────
+def _render(name: str, **ctx) -> HTMLResponse:
+    """Simple Jinja2 template renderer."""
+    from jinja2 import Environment, FileSystemLoader
+
+    env = Environment(loader=FileSystemLoader(str(templates_dir)))
+    template = env.get_template(name)
+    return HTMLResponse(template.render(**ctx))
+
+
+# ── Routes ───────────────────────────────────────────────────────
+@app.get("/", response_class=HTMLResponse)
+def upload_page():
+    return _render("upload.html.jinja2", llm_enabled=_LLM_ENABLED)
+
+
+@app.post("/upload")
+async def upload_files(v1_file: UploadFile = File(...), v2_file: UploadFile = File(...)):
+    """Accept two PDFs, create job, and start pipeline."""
+    # Validate
+    for f in [v1_file, v2_file]:
+        if not f.filename or not f.filename.lower().endswith(".pdf"):
+            return JSONResponse({"error": f"{f.filename} 不是 PDF 文件"}, status_code=400)
+        content = await f.read()
+        if len(content) > 50 * 1024 * 1024:
+            return JSONResponse({"error": f"{f.filename} 超过 50MB 限制"}, status_code=400)
+        await f.seek(0)
+
+    job_id = uuid.uuid4().hex[:8]
+    upload_dir = _PROJECT_ROOT / "data" / "uploads" / job_id
+    upload_dir.mkdir(parents=True, exist_ok=True)
+
+    # Save files
+    v1_path = upload_dir / "v1.pdf"
+    v2_path = upload_dir / "v2.pdf"
+    v1_path.write_bytes(await v1_file.read())
+    v2_path.write_bytes(await v2_file.read())
+
+    # Create job
+    now = datetime.now(timezone.utc)
+    with _JOBS_LOCK:
+        _lr_evict()
+        _JOBS[job_id] = {
+            "id": job_id,
+            "status": "queued",
+            "progress": 0,
+            "step_label": "排队中",
+            "message": "任务已创建",
+            "log_lines": [],
+            "result_path": None,
+            "error": None,
+            "created_at": now,
+            "v1_filename": v1_file.filename or "v1.pdf",
+            "v2_filename": v2_file.filename or "v2.pdf",
+            "v1_path": str(v1_path),
+            "v2_path": str(v2_path),
+        }
+
+    # Start pipeline in background
+    _executor.submit(_run_pipeline, job_id, str(v1_path), str(v2_path), False)
+
+    return RedirectResponse(url=f"/job/{job_id}", status_code=303)
+
+
+@app.get("/job/{job_id}", response_class=HTMLResponse)
+def job_page(job_id: str):
+    """Processing/progress page."""
+    with _JOBS_LOCK:
+        job = _JOBS.get(job_id)
+    if not job:
+        return HTMLResponse("任务未找到", status_code=404)
+    return _render("job.html.jinja2", job=job)
+
+
+@app.get("/api/jobs/{job_id}")
+def job_api(job_id: str):
+    """JSON endpoint for polling."""
+    with _JOBS_LOCK:
+        job = _JOBS.get(job_id)
+    if not job:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    elapsed = (datetime.now(timezone.utc) - job["created_at"]).total_seconds()
+    return JSONResponse({
+        "id": job["id"],
+        "status": job["status"],
+        "progress": job["progress"],
+        "step_label": job["step_label"],
+        "message": job.get("message", ""),
+        "error": job.get("error"),
+        "elapsed_seconds": int(elapsed),
+    })
+
+
+@app.get("/results/{job_id}", response_class=HTMLResponse)
+def results_page(job_id: str, request: Request):
+    """Render formatted results page."""
+    with _JOBS_LOCK:
+        job = _JOBS.get(job_id)
+
+    if not job:
+        return HTMLResponse("任务未找到", status_code=404)
+
+    result_path = job.get("result_path")
+    if not result_path or not os.path.exists(result_path):
+        return HTMLResponse("结果文件不存在", status_code=404)
+
+    with open(result_path, encoding="utf-8") as f:
+        data = json.load(f)
+
+    # Risk category name mapping
+    from src.risk_classifier import RISK_CATEGORIES
+    cat_map = {c["id"]: c["name"] for c in RISK_CATEGORIES}
+
+    # Enrich changes with category names
+    for change in data.get("changes", []):
+        change["risk_category_names"] = [
+            cat_map.get(cid, cid) for cid in change.get("risk_categories", [])
+        ]
+        change["_change_icon"] = {
+            "added": "+", "removed": "−", "modified": "~"
+        }.get(change.get("change_type", ""), "?")
+
+    return _render(
+        "results.html.jinja2",
+        job=job,
+        data=data,
+        cat_map=cat_map,
+    )
+
+
+@app.get("/api/results/{job_id}/json")
+def results_json(job_id: str):
+    """Raw JSON download."""
+    with _JOBS_LOCK:
+        job = _JOBS.get(job_id)
+    if not job or not job.get("result_path"):
+        return JSONResponse({"error": "not found"}, status_code=404)
+    return JSONResponse(json.loads(Path(job["result_path"]).read_text(encoding="utf-8")))
+
+
+# ── Main ─────────────────────────────────────────────────────────
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("web.app:app", host="0.0.0.0", port=8000, reload=True)

@@ -1,0 +1,174 @@
+{% extends "base.html.jinja2" %}
+{% block title %}比对中 — ContractLens{% endblock %}
+{% block content %}
+<div class="max-w-2xl mx-auto px-4 py-12 sm:py-20" x-data="poller('{{ job.id }}')">
+  <!-- Header -->
+  <div class="text-center mb-10 animate-fade-in">
+    <div class="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-brand-50 mb-5 animate-pulse-ring">
+      <svg class="w-8 h-8 text-brand-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+              d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"/>
+      </svg>
+    </div>
+    <h1 class="text-2xl font-bold text-slate-900 tracking-tight">AI 正在深度比对</h1>
+    <p class="text-slate-500 mt-2 text-sm">分析两份合同的条款结构、语义差异与潜在风险</p>
+  </div>
+
+  <!-- Progress bar -->
+  <div class="bg-white rounded-2xl border border-slate-200 p-6 mb-6 animate-fade-in stagger-1">
+    <div class="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden mb-4">
+      <div class="h-full rounded-full transition-all duration-700 ease-out"
+           :class="progress >= 90 ? 'bg-emerald-500' : 'bg-brand-600'"
+           :style="'width: ' + Math.max(progress, 3) + '%'"></div>
+    </div>
+    <div class="flex justify-between items-center">
+      <span class="text-sm font-medium" :class="progress >= 90 ? 'text-emerald-600' : 'text-brand-700'" x-text="step_label">准备中</span>
+      <span class="text-sm font-mono text-slate-400" x-text="Math.round(progress) + '%'">0%</span>
+    </div>
+  </div>
+
+  <!-- Pipeline stages -->
+  <div class="bg-white rounded-2xl border border-slate-200 p-6 mb-6 animate-fade-in stagger-2">
+    <div class="space-y-0">
+      {% set stages = [
+        ('extracting', 'PDF 文本提取', '提取合同全文，过滤英文内容'),
+        ('tree_building', '条款树解析', '识别章节层级与条款结构'),
+        ('aligning', '条款对齐', '匹配两个版本的对应条款'),
+        ('identifying', '差异识别', 'LLM 逐条对比，发现实质变化'),
+        ('classifying', '风险分类', '评估风险等级，生成通俗提示'),
+      ] %}
+      <template x-for="(stage, i) in stages" :key="i">
+        <div class="flex items-start gap-3 py-2.5"
+             :class="stageStatus(stage[0])">
+          <div class="flex-shrink-0 mt-0.5">
+            <!-- Done -->
+            <div x-show="completedStages.includes(stage[0])" class="w-6 h-6 rounded-full bg-emerald-100 flex items-center justify-center">
+              <svg class="w-3.5 h-3.5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/>
+              </svg>
+            </div>
+            <!-- Active -->
+            <div x-show="activeStage === stage[0]" class="w-6 h-6 rounded-full bg-brand-100 flex items-center justify-center">
+              <div class="w-2.5 h-2.5 rounded-full bg-brand-600 animate-pulse"></div>
+            </div>
+            <!-- Pending -->
+            <div x-show="!completedStages.includes(stage[0]) && activeStage !== stage[0]" class="w-6 h-6 rounded-full bg-slate-100 flex items-center justify-center">
+              <div class="w-2 h-2 rounded-full bg-slate-300"></div>
+            </div>
+          </div>
+          <div class="flex-1 min-w-0" :class="completedStages.includes(stage[0]) ? 'opacity-70' : ''">
+            <span class="text-sm font-medium text-slate-700" x-text="'{{ loop.index }}. ' + stage[1]">stage</span>
+            <span class="text-xs text-slate-400 ml-2" x-text="stage[2]"></span>
+          </div>
+        </div>
+      </template>
+    </div>
+  </div>
+
+  <!-- Live log -->
+  <div class="bg-white rounded-2xl border border-slate-200 p-5 animate-fade-in stagger-3">
+    <div class="flex items-center gap-2 mb-3">
+      <div class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></div>
+      <span class="text-xs font-medium text-slate-500 uppercase tracking-wider">实时日志</span>
+    </div>
+    <div class="bg-slate-50 rounded-xl p-4 max-h-40 overflow-y-auto font-mono text-xs text-slate-600 space-y-1" id="logContainer">
+      <div x-show="logLines.length === 0" class="animate-shimmer h-4 w-3/4 rounded"></div>
+      <template x-for="line in logLines.slice(-10)" :key="line">
+        <div class="truncate" x-text="line"></div>
+      </template>
+      <div ref="logEnd"></div>
+    </div>
+  </div>
+
+  <!-- Timer -->
+  <div class="text-center mt-6 animate-fade-in stagger-4">
+    <span class="text-sm text-slate-400">
+      已耗时 <span class="font-mono font-medium text-slate-600" x-text="formatElapsed(elapsed)">00:00</span>
+    </span>
+  </div>
+
+  <!-- Error -->
+  <div x-show="error" class="mt-6 bg-red-50 border border-red-200 rounded-2xl p-5 animate-fade-in" style="display:none">
+    <div class="flex items-start gap-3">
+      <svg class="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+      </svg>
+      <div>
+        <p class="font-medium text-red-800 text-sm">比对失败</p>
+        <p class="text-red-600 text-sm mt-1" x-text="error"></p>
+        <a href="/" class="inline-block mt-3 text-sm text-red-700 underline">重新上传</a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function poller(jobId) {
+  const stageIds = ['extracting', 'tree_building', 'aligning', 'identifying', 'classifying'];
+  return {
+    progress: {{ job.progress }},
+    step_label: '{{ job.step_label }}',
+    message: '{{ job.message }}',
+    logLines: [],
+    error: null,
+    elapsed: 0,
+    activeStatus: '{{ job.status }}',
+    _interval: null,
+
+    get stages() {
+      return [
+        ['extracting', 'PDF 文本提取', '提取合同全文，过滤英文内容'],
+        ['tree_building', '条款树解析', '识别章节层级与条款结构'],
+        ['aligning', '条款对齐', '匹配两个版本的对应条款'],
+        ['identifying', '差异识别', 'LLM 逐条对比，发现实质变化'],
+        ['classifying', '风险分类', '评估风险等级，生成通俗提示'],
+      ];
+    },
+    get activeStage() { return this.activeStatus; },
+    get completedStages() {
+      const idx = stageIds.indexOf(this.activeStatus);
+      return idx > -1 ? stageIds.slice(0, idx) : (this.activeStatus === 'done' ? stageIds : []);
+    },
+
+    init() {
+      this._interval = setInterval(() => this.tick(), 2500);
+      this.tick();
+    },
+
+    stageStatus(stageId) {
+      if (this.completedStages.includes(stageId)) return 'opacity-60';
+      if (this.activeStage === stageId) return '';
+      return '';
+    },
+
+    async tick() {
+      try {
+        const resp = await fetch('/api/jobs/' + jobId);
+        const data = await resp.json();
+        this.progress = data.progress || 0;
+        this.step_label = data.step_label || this.step_label;
+        this.message = data.message || this.message;
+        this.activeStatus = data.status || this.activeStatus;
+        this.elapsed = data.elapsed_seconds || 0;
+        if (data.error) this.error = data.error;
+        if (data.status === 'done') {
+          this.progress = 100;
+          clearInterval(this._interval);
+          setTimeout(() => { window.location.href = '/results/' + jobId; }, 800);
+        }
+        if (data.status === 'error') {
+          clearInterval(this._interval);
+          this.error = data.error || '未知错误';
+        }
+      } catch(e) {}
+    },
+
+    formatElapsed(s) {
+      const m = Math.floor(s / 60);
+      const sec = s % 60;
+      return String(m).padStart(2,'0') + ':' + String(sec).padStart(2,'0');
+    }
+  }
+}
+</script>
+{% endblock %}
