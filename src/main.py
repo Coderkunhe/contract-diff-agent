@@ -24,8 +24,13 @@ def _load_env():
         load_dotenv(env_path)
 
 
-def _run_v03(args, v1, v2, api_key: str, base_url: str, model: str) -> dict:
-    """Full v0.3 pipeline: clause tree → align → identify → validate."""
+def _run_v03(args, v1, v2, api_key: str, base_url: str, model: str,
+             on_change: callable = None) -> dict:
+    """Full v0.3 pipeline: clause tree → align → identify → validate.
+
+    Args:
+        on_change: Optional callback(change_dict) for SSE streaming.
+    """
     from .clause_tree import build_clause_tree
     from .clause_aligner import align_clauses
     from .diff_identifier import identify_changes
@@ -41,22 +46,24 @@ def _run_v03(args, v1, v2, api_key: str, base_url: str, model: str) -> dict:
     matched = sum(1 for p in diff_map.pairs if p.alignment_type == "match")
     print(f"   匹配: {matched} 对, 新增: {len(diff_map.v2_unmatched)}, 删除: {len(diff_map.v1_unmatched)}")
 
-    print(f"\n③ LLM 差异识别...")
-    raw_changes = identify_changes(diff_map, api_key=api_key, model=model, base_url=base_url)
-    print(f"   识别到 {len(raw_changes)} 条原始变化")
+    print(f"\n③ LLM 差异识别 + 风险分类 (并行)...")
+    raw_changes, frequency = identify_changes(
+        diff_map, api_key=api_key, model=model, base_url=base_url,
+        on_change=on_change,
+    )
+    print(f"   识别到 {len(raw_changes)} 条变化(含风险分类)")
 
     # L2 validation (fast, always runs)
-    from .validator import validate_changes
+    from .validator import validate_changes as validate_l3
+    from .validator import _l2_check
     print(f"\n④ 校验...")
     if args.validate:
-        validated = validate_changes(
+        validated = validate_l3(
             raw_changes,
             v1.full_text, v2.full_text,
             api_key=api_key, model=model, base_url=base_url,
         )
     else:
-        # L2 only (no LLM validation)
-        from .validator import _l2_check
         validated = []
         for c in raw_changes:
             val = {"validation": _l2_check(c, v1.full_text, v2.full_text)}
@@ -66,31 +73,23 @@ def _run_v03(args, v1, v2, api_key: str, base_url: str, model: str) -> dict:
             c_with_val["validation"] = val["validation"]
             validated.append(c_with_val)
 
-    # Step ⑤: Risk classification
-    from .risk_classifier import classify_changes, save_taxonomy, RISK_CATEGORIES
-
-    print(f"\n⑤ 风险分类...")
-    classified = classify_changes(
-        validated, api_key=api_key, model=model, base_url=base_url,
-    )
-
     # Compute risk taxonomy snapshot
-    frequency: dict[str, int] = {}
+    from .risk_classifier import save_taxonomy, RISK_CATEGORIES
     categories_used: set[str] = set()
-    for c in classified:
+    for c in validated:
         for cat_id in c.get("risk_categories", []):
-            frequency[cat_id] = frequency.get(cat_id, 0) + 1
             categories_used.add(cat_id)
 
     high_freq = [k for k, v in frequency.items() if v >= 10]
-    confirmed = sum(1 for vc in classified
+    confirmed = sum(1 for vc in validated
                     if vc.get("validation", {}).get("l3_verdict") == "confirmed"
                     or vc.get("validation", {}).get("status", "") in ("l2_only", "skipped")
                     or vc.get("validation", {}).get("status") is None)
 
-    # Persist taxonomy
     save_taxonomy(frequency, [])
     cat_names = {c["id"]: c["name"] for c in RISK_CATEGORIES}
+
+    classified = validated  # alias for result building
 
     # Build final result
     result = {

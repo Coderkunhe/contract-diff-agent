@@ -9,6 +9,7 @@ import argparse
 import io
 import json
 import os
+import queue
 import re
 import sys
 import threading
@@ -17,10 +18,10 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, AsyncGenerator
 
 from fastapi import FastAPI, File, Form, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 # Ensure project root is on path
@@ -151,22 +152,53 @@ def _append_log_inner(job_id: str, line: str):
                 logs[:] = logs[-50:]
 
 
+def _send_event(job_id: str, event_type: str, data: dict):
+    """Push an SSE event to the job's event queue."""
+    with _JOBS_LOCK:
+        j = _JOBS.get(job_id)
+    if j and j.get("_event_queue"):
+        try:
+            j["_event_queue"].put_nowait({"event": event_type, "data": data})
+        except queue.Full:
+            pass
+
+
 # ── Pipeline worker ──────────────────────────────────────────────
 def _run_pipeline(job_id: str, v1_path: str, v2_path: str, keep_english: bool):
-    """Run pipeline in background thread."""
+    """Run pipeline in background thread, streaming results via SSE."""
     with _JOBS_LOCK:
         job = _JOBS.get(job_id)
     if not job:
         return
 
+    # Callback for streaming changes
+    def _on_change(change: dict):
+        _send_event(job_id, "change", {
+            "id": change.get("id", ""),
+            "change_type": change.get("change_type", "modified"),
+            "brief": change.get("brief", ""),
+            "risk_level": change.get("risk_level", "medium"),
+            "risk_note": change.get("risk_note", ""),
+            "risk_categories": change.get("risk_categories", []),
+            "clause_ref_v2": change.get("clause_ref_v2") or change.get("clause_ref_v1", ""),
+            "attention_for": change.get("attention_for"),
+            "is_favorable": change.get("is_favorable"),
+        })
+
     try:
         now = datetime.now(timezone.utc)
         _update_job_inner(job_id, status="extracting", progress=5,
                           message="正在提取 PDF 文本...", timestamp=now)
+        _send_event(job_id, "progress", {"status": "extracting", "step": "提取 PDF 文本",
+                      "progress": 5, "message": "正在提取 PDF 文本..."})
+
         v1 = extract_contract(v1_path, keep_english=keep_english)
         v2 = extract_contract(v2_path, keep_english=keep_english)
 
         fake_args = argparse.Namespace(validate=False)
+
+        _send_event(job_id, "progress", {"status": "tree_building", "step": "构建条款树",
+                      "progress": 10, "message": "构建条款树..."})
 
         # Capture stdout for progress tracking
         tracker = JobProgressIO(job_id, sys.stdout)
@@ -179,9 +211,19 @@ def _run_pipeline(job_id: str, v1_path: str, v2_path: str, keep_english: bool):
                 api_key=config.api_key,
                 base_url=config.base_url,
                 model=config.model,
+                on_change=_on_change,
             )
         finally:
             sys.stdout = old_stdout
+
+        # Send summary
+        s = result.get("diff_summary", {})
+        _send_event(job_id, "summary", {
+            "total_changes": s.get("total_changes", 0),
+            "high_risk": s.get("high_risk", 0),
+            "medium_risk": s.get("medium_risk", 0),
+            "low_risk": s.get("low_risk", 0),
+        })
 
         # Save result
         result_dir = _PROJECT_ROOT / "data" / "jobs"
@@ -194,11 +236,13 @@ def _run_pipeline(job_id: str, v1_path: str, v2_path: str, keep_english: bool):
         _update_job_inner(job_id, status="done", progress=100,
                           result_path=str(result_path),
                           message="比对完成", timestamp=now)
+        _send_event(job_id, "done", {"result_url": f"/results/{job_id}"})
 
     except Exception as e:
         now = datetime.now(timezone.utc)
         _update_job_inner(job_id, status="error",
                           error=str(e), message=f"错误: {e}", timestamp=now)
+        _send_event(job_id, "error", {"error": str(e)})
 
 
 # ── Jinja2 template helpers ──────────────────────────────────────
@@ -239,7 +283,7 @@ async def upload_files(v1_file: UploadFile = File(...), v2_file: UploadFile = Fi
     v1_path.write_bytes(await v1_file.read())
     v2_path.write_bytes(await v2_file.read())
 
-    # Create job
+    # Create job with event queue for SSE streaming
     now = datetime.now(timezone.utc)
     with _JOBS_LOCK:
         _lr_evict()
@@ -257,6 +301,7 @@ async def upload_files(v1_file: UploadFile = File(...), v2_file: UploadFile = Fi
             "v2_filename": v2_file.filename or "v2.pdf",
             "v1_path": str(v1_path),
             "v2_path": str(v2_path),
+            "_event_queue": queue.Queue(maxsize=500),
         }
 
     # Start pipeline in background
@@ -339,6 +384,38 @@ def results_json(job_id: str):
     if not job or not job.get("result_path"):
         return JSONResponse({"error": "not found"}, status_code=404)
     return JSONResponse(json.loads(Path(job["result_path"]).read_text(encoding="utf-8")))
+
+
+# ── SSE Streaming ──────────────────────────────────────────────────
+@app.get("/job/{job_id}/stream")
+async def job_stream(job_id: str):
+    """SSE endpoint: streams changes as they're identified."""
+    with _JOBS_LOCK:
+        job = _JOBS.get(job_id)
+    if not job:
+        return JSONResponse({"error": "not found"}, status_code=404)
+
+    eq: queue.Queue = job.get("_event_queue")
+    if not eq:
+        return JSONResponse({"error": "no stream"}, status_code=400)
+
+    async def event_generator():
+        while True:
+            try:
+                msg = eq.get(timeout=30)
+                event_type = msg.get("event", "message")
+                data = json.dumps(msg.get("data", {}), ensure_ascii=False)
+                yield f"event: {event_type}\ndata: {data}\n\n"
+                if event_type in ("done", "error"):
+                    break
+            except queue.Empty:
+                yield f"event: ping\ndata: {{}}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 # ── Main ─────────────────────────────────────────────────────────

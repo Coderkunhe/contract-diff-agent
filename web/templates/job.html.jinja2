@@ -1,172 +1,183 @@
 {% extends "base.html.jinja2" %}
 {% block title %}比对中 — ContractLens{% endblock %}
 {% block content %}
-<div class="max-w-2xl mx-auto px-4 py-12 sm:py-20" x-data="poller('{{ job.id }}')">
-  <!-- Header -->
-  <div class="text-center mb-10 animate-fade-in">
-    <div class="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-brand-50 mb-5 animate-pulse-ring">
-      <svg class="w-8 h-8 text-brand-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
-              d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"/>
-      </svg>
-    </div>
-    <h1 class="text-2xl font-bold text-slate-900 tracking-tight">AI 正在深度比对</h1>
-    <p class="text-slate-500 mt-2 text-sm">分析两份合同的条款结构、语义差异与潜在风险</p>
-  </div>
-
-  <!-- Progress bar -->
-  <div class="bg-white rounded-2xl border border-slate-200 p-6 mb-6 animate-fade-in stagger-1">
-    <div class="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden mb-4">
-      <div class="h-full rounded-full transition-all duration-700 ease-out"
-           :class="progress >= 90 ? 'bg-emerald-500' : 'bg-brand-600'"
-           :style="'width: ' + Math.max(progress, 3) + '%'"></div>
-    </div>
-    <div class="flex justify-between items-center">
-      <span class="text-sm font-medium" :class="progress >= 90 ? 'text-emerald-600' : 'text-brand-700'" x-text="step_label">准备中</span>
-      <span class="text-sm font-mono text-slate-400" x-text="Math.round(progress) + '%'">0%</span>
-    </div>
-  </div>
-
-  <!-- Pipeline stages -->
-  <div class="bg-white rounded-2xl border border-slate-200 p-6 mb-6 animate-fade-in stagger-2">
-    <div class="space-y-0">
-      {% set stages = [
-        ('extracting', 'PDF 文本提取', '提取合同全文，过滤英文内容'),
-        ('tree_building', '条款树解析', '识别章节层级与条款结构'),
-        ('aligning', '条款对齐', '匹配两个版本的对应条款'),
-        ('identifying', '差异识别', 'LLM 逐条对比，发现实质变化'),
-        ('classifying', '风险分类', '评估风险等级，生成通俗提示'),
-      ] %}
-      <template x-for="(stage, i) in stages" :key="i">
-        <div class="flex items-start gap-3 py-2.5"
-             :class="stageStatus(stage[0])">
-          <div class="flex-shrink-0 mt-0.5">
-            <!-- Done -->
-            <div x-show="completedStages.includes(stage[0])" class="w-6 h-6 rounded-full bg-emerald-100 flex items-center justify-center">
-              <svg class="w-3.5 h-3.5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/>
-              </svg>
-            </div>
-            <!-- Active -->
-            <div x-show="activeStage === stage[0]" class="w-6 h-6 rounded-full bg-brand-100 flex items-center justify-center">
-              <div class="w-2.5 h-2.5 rounded-full bg-brand-600 animate-pulse"></div>
-            </div>
-            <!-- Pending -->
-            <div x-show="!completedStages.includes(stage[0]) && activeStage !== stage[0]" class="w-6 h-6 rounded-full bg-slate-100 flex items-center justify-center">
-              <div class="w-2 h-2 rounded-full bg-slate-300"></div>
-            </div>
-          </div>
-          <div class="flex-1 min-w-0" :class="completedStages.includes(stage[0]) ? 'opacity-70' : ''">
-            <span class="text-sm font-medium text-slate-700" x-text="'{{ loop.index }}. ' + stage[1]">stage</span>
-            <span class="text-xs text-slate-400 ml-2" x-text="stage[2]"></span>
-          </div>
+<div class="max-w-5xl mx-auto px-4 py-8" x-data="streamer('{{ job.id }}')">
+  <!-- Progress header -->
+  <div class="bg-white rounded-2xl border border-slate-200 p-6 mb-6 sticky top-[72px] z-30 backdrop-blur-sm bg-white/95">
+    <div class="flex items-center gap-4 mb-3">
+      <div class="flex-shrink-0 w-10 h-10 rounded-xl flex items-center justify-center"
+           :class="status === 'done' ? 'bg-emerald-50 text-emerald-600' : 'bg-brand-50 text-brand-600'">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"
+             :class="status !== 'done' && 'animate-spin'">
+          <template x-if="status === 'done'">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+          </template>
+          <template x-if="status !== 'done'">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                  d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"/>
+          </template>
+        </svg>
+      </div>
+      <div class="flex-1">
+        <div class="flex items-center justify-between mb-1">
+          <span class="text-sm font-semibold text-slate-700" x-text="stepLabel">准备中</span>
+          <span class="text-xs font-mono text-slate-400" x-text="statText"></span>
         </div>
-      </template>
-    </div>
-  </div>
-
-  <!-- Live log -->
-  <div class="bg-white rounded-2xl border border-slate-200 p-5 animate-fade-in stagger-3">
-    <div class="flex items-center gap-2 mb-3">
-      <div class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></div>
-      <span class="text-xs font-medium text-slate-500 uppercase tracking-wider">实时日志</span>
-    </div>
-    <div class="bg-slate-50 rounded-xl p-4 max-h-40 overflow-y-auto font-mono text-xs text-slate-600 space-y-1" id="logContainer">
-      <div x-show="logLines.length === 0" class="animate-shimmer h-4 w-3/4 rounded"></div>
-      <template x-for="line in logLines.slice(-10)" :key="line">
-        <div class="truncate" x-text="line"></div>
-      </template>
-      <div ref="logEnd"></div>
-    </div>
-  </div>
-
-  <!-- Timer -->
-  <div class="text-center mt-6 animate-fade-in stagger-4">
-    <span class="text-sm text-slate-400">
-      已耗时 <span class="font-mono font-medium text-slate-600" x-text="formatElapsed(elapsed)">00:00</span>
-    </span>
-  </div>
-
-  <!-- Error -->
-  <div x-show="error" class="mt-6 bg-red-50 border border-red-200 rounded-2xl p-5 animate-fade-in" style="display:none">
-    <div class="flex items-start gap-3">
-      <svg class="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
-      </svg>
-      <div>
-        <p class="font-medium text-red-800 text-sm">比对失败</p>
-        <p class="text-red-600 text-sm mt-1" x-text="error"></p>
-        <a href="/" class="inline-block mt-3 text-sm text-red-700 underline">重新上传</a>
+        <div class="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
+          <div class="h-full rounded-full transition-all duration-700 ease-out"
+               :class="status === 'done' ? 'bg-emerald-500' : 'bg-brand-600'"
+               :style="'width: ' + Math.max(progress, 2) + '%'"></div>
+        </div>
       </div>
     </div>
+    <!-- Live stats -->
+    <div class="flex gap-4 text-xs text-slate-400">
+      <span>🕐 <span x-text="elapsed">0</span>s</span>
+      <span>📝 <span x-text="changeCount">0</span> 条变化</span>
+      <span x-show="highCount > 0">🔴 高风险 <span x-text="highCount" class="text-red-500 font-bold"></span></span>
+    </div>
+    <!-- Error -->
+    <div x-show="errorMsg" class="mt-3 bg-red-50 border border-red-200 rounded-xl p-3 text-sm text-red-700" x-text="errorMsg" style="display:none"></div>
+  </div>
+
+  <!-- Live change feed -->
+  <div class="space-y-3" id="changeFeed">
+    <template x-for="change in changes" :key="change.id">
+      <div class="bg-white rounded-xl border border-slate-200 p-4 animate-fade-in hover:shadow-sm transition-shadow"
+           :class="change.risk_level === 'high' ? 'border-l-[3px] border-l-red-400' : ''"
+           x-transition:enter="transition ease-out duration-300"
+           x-transition:enter-start="opacity-0 -translate-y-2"
+           x-transition:enter-end="opacity-100 translate-y-0">
+        <div class="flex items-start gap-3">
+          <div class="flex-shrink-0 w-6 h-6 rounded-lg flex items-center justify-center text-[10px] font-bold"
+               :class="{
+                 'bg-red-100 text-red-600': change.risk_level === 'high',
+                 'bg-amber-100 text-amber-600': change.risk_level === 'medium',
+                 'bg-emerald-100 text-emerald-600': change.risk_level === 'low'
+               }"
+               x-text="change.risk_level === 'high' ? '!' : change.risk_level === 'medium' ? '!' : 'i'"></div>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-1.5 mb-1 flex-wrap">
+              <span class="text-[10px] font-mono text-slate-400" x-text="change.id"></span>
+              <span class="text-[10px] px-1.5 py-0.5 rounded font-medium"
+                    :class="{
+                      'bg-emerald-50 text-emerald-700': change.change_type === 'added',
+                      'bg-red-50 text-red-700': change.change_type === 'removed',
+                      'bg-blue-50 text-blue-700': change.change_type === 'modified'
+                    }"
+                    x-text="{'added':'新增','removed':'删除','modified':'修改'}[change.change_type] || change.change_type"></span>
+              <span class="text-[10px] px-1.5 py-0.5 rounded font-medium"
+                    :class="{
+                      'bg-red-50 text-red-700': change.risk_level === 'high',
+                      'bg-amber-50 text-amber-700': change.risk_level === 'medium',
+                      'bg-emerald-50 text-emerald-700': change.risk_level === 'low'
+                    }"
+                    x-text="{'high':'高风险','medium':'中风险','low':'低风险'}[change.risk_level]"></span>
+            </div>
+            <p class="text-sm font-medium text-slate-800 mb-1" x-text="change.brief"></p>
+            <div x-show="change.risk_note" class="rounded-lg p-2 text-xs mb-1"
+                 :class="{
+                   'bg-red-50 text-red-700 border border-red-100': change.risk_level === 'high',
+                   'bg-amber-50 text-amber-700 border border-amber-100': change.risk_level === 'medium',
+                   'bg-slate-50 text-slate-600 border border-slate-100': change.risk_level === 'low'
+                 }">
+              <span class="font-semibold">⚠</span> <span x-text="change.risk_note"></span>
+            </div>
+            <div class="flex items-center gap-2 text-[10px] text-slate-400 flex-wrap">
+              <span x-show="change.clause_ref_v2" x-text="change.clause_ref_v2"></span>
+              <template x-for="cat in change.risk_categories" :key="cat">
+                <span class="bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded">{{ cat }}</span>
+              </template>
+              <span x-show="change.attention_for" x-text="'👤 ' + change.attention_for"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </template>
+  </div>
+
+  <!-- Done state -->
+  <div x-show="status === 'done'" class="text-center py-10 animate-fade-in">
+    <a :href="'/results/' + jobId" class="inline-flex items-center gap-2 px-6 py-3 bg-slate-900 text-white rounded-2xl font-semibold hover:bg-slate-800 transition-colors shadow-lg shadow-slate-200">
+      查看完整报告
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6"/>
+      </svg>
+    </a>
   </div>
 </div>
 
 <script>
-function poller(jobId) {
-  const stageIds = ['extracting', 'tree_building', 'aligning', 'identifying', 'classifying'];
+function streamer(jobId) {
   return {
-    progress: {{ job.progress }},
-    step_label: '{{ job.step_label }}',
-    message: '{{ job.message }}',
-    logLines: [],
-    error: null,
+    jobId: jobId,
+    status: 'connecting',
+    progress: 0,
+    stepLabel: '连接中...',
+    changes: [],
+    changeCount: 0,
+    highCount: 0,
     elapsed: 0,
-    activeStatus: '{{ job.status }}',
-    _interval: null,
+    errorMsg: '',
+    _es: null,
+    _timer: null,
 
-    get stages() {
-      return [
-        ['extracting', 'PDF 文本提取', '提取合同全文，过滤英文内容'],
-        ['tree_building', '条款树解析', '识别章节层级与条款结构'],
-        ['aligning', '条款对齐', '匹配两个版本的对应条款'],
-        ['identifying', '差异识别', 'LLM 逐条对比，发现实质变化'],
-        ['classifying', '风险分类', '评估风险等级，生成通俗提示'],
-      ];
-    },
-    get activeStage() { return this.activeStatus; },
-    get completedStages() {
-      const idx = stageIds.indexOf(this.activeStatus);
-      return idx > -1 ? stageIds.slice(0, idx) : (this.activeStatus === 'done' ? stageIds : []);
+    get statText() {
+      if (this.status === 'done') return '✅ 完成';
+      return Math.round(this.progress) + '%';
     },
 
     init() {
-      this._interval = setInterval(() => this.tick(), 2500);
-      this.tick();
+      this._timer = setInterval(() => { this.elapsed++; }, 1000);
+      this.connect();
     },
 
-    stageStatus(stageId) {
-      if (this.completedStages.includes(stageId)) return 'opacity-60';
-      if (this.activeStage === stageId) return '';
-      return '';
-    },
+    connect() {
+      this._es = new EventSource('/job/' + jobId + '/stream');
 
-    async tick() {
-      try {
-        const resp = await fetch('/api/jobs/' + jobId);
-        const data = await resp.json();
-        this.progress = data.progress || 0;
-        this.step_label = data.step_label || this.step_label;
-        this.message = data.message || this.message;
-        this.activeStatus = data.status || this.activeStatus;
-        this.elapsed = data.elapsed_seconds || 0;
-        if (data.error) this.error = data.error;
-        if (data.status === 'done') {
-          this.progress = 100;
-          clearInterval(this._interval);
-          setTimeout(() => { window.location.href = '/results/' + jobId; }, 800);
+      this._es.addEventListener('progress', (e) => {
+        const d = JSON.parse(e.data);
+        this.status = d.status || this.status;
+        this.progress = d.progress || this.progress;
+        this.stepLabel = d.step || d.message || this.stepLabel;
+      });
+
+      this._es.addEventListener('change', (e) => {
+        const d = JSON.parse(e.data);
+        this.changes = [d, ...this.changes];
+        this.changeCount = this.changes.length;
+        if (d.risk_level === 'high') this.highCount++;
+      });
+
+      this._es.addEventListener('summary', (e) => {
+        const d = JSON.parse(e.data);
+        this.changeCount = d.total_changes || this.changeCount;
+      });
+
+      this._es.addEventListener('done', (e) => {
+        this.status = 'done';
+        this.progress = 100;
+        this.stepLabel = '比对完成';
+        this._es.close();
+        clearInterval(this._timer);
+      });
+
+      this._es.addEventListener('error', (e) => {
+        try {
+          const d = JSON.parse(e.data);
+          this.errorMsg = d.error || '连接失败';
+        } catch(_) {
+          this.errorMsg = '连接中断，请刷新重试';
         }
-        if (data.status === 'error') {
-          clearInterval(this._interval);
-          this.error = data.error || '未知错误';
-        }
-      } catch(e) {}
-    },
+        this._es.close();
+        clearInterval(this._timer);
+      });
 
-    formatElapsed(s) {
-      const m = Math.floor(s / 60);
-      const sec = s % 60;
-      return String(m).padStart(2,'0') + ':' + String(sec).padStart(2,'0');
+      this._es.onerror = () => {
+        if (this._es.readyState === EventSource.CLOSED) {
+          clearInterval(this._timer);
+        }
+      };
     }
   }
 }

@@ -7,10 +7,14 @@ With retry loop and exit conditions.
 
 import json
 import re
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
 from openai import OpenAI
 from json_repair import repair_json
+
+_VALIDATE_MAX_WORKERS = 8
 
 VALIDATOR_SYSTEM = """你是合同比对验证专家。你的任务是验证一条声称的合同差异是否真实存在。
 
@@ -51,51 +55,78 @@ def validate_changes(
     api_key: str,
     model: str = "anthropic/claude-sonnet-4.6",
     base_url: str = "https://api.gmi-serving.com/v1",
-    max_retries: int = 3,
+    max_retries: int = 2,
+    max_workers: int = _VALIDATE_MAX_WORKERS,
 ) -> list[dict]:
-    """Validate all changes through L2 (algorithm) and L3 (LLM).
+    """Validate all changes: L2 (algorithm, fast) + L3 (LLM, PARALLEL)."""
 
-    Exit conditions per change:
-    - Max 3 retries for L3 validation
-    - Overall: mark uncertain if still failing
-    """
-    client = OpenAI(api_key=api_key, base_url=base_url, timeout=300)
-
-    validated: list[dict] = []
-    stats = {"confirmed": 0, "rejected": 0, "uncertain": 0}
-
-    for i, change in enumerate(changes):
-        if i % 20 == 0 and i > 0:
-            print(f"  校验进度: {i}/{len(changes)} "
-                  f"(confirmed={stats['confirmed']}, rejected={stats['rejected']}, "
-                  f"uncertain={stats['uncertain']})")
-
-        vc = dict(change)  # Copy
-        vc["validation"] = {"status": "unchecked"}
-
-        # L2: snippet existence check
+    # L2: all at once (fast, no API calls)
+    print(f"  L2 原文校验 ({len(changes)} 条)...")
+    for change in changes:
         l2_result = _l2_check(change, v1_full_text, v2_full_text)
-        vc["validation"].update(l2_result)
+        change["_l2"] = l2_result
 
-        # L3: LLM semantic validation (for LLM-generated changes)
-        if change.get("source") == "llm":
-            l3_result = _l3_validate(change, v1_full_text, v2_full_text,
-                                     client, model, max_retries)
-            vc["validation"].update(l3_result)
-            stats[l3_result.get("verdict", "uncertain")] += 1
-        else:
-            vc["validation"]["l3_verdict"] = "confirmed"
-            vc["validation"]["status"] = "verified"
-            vc["validation"]["confidence"] = 1.0
-            stats["confirmed"] += 1
+    # L3: only for LLM-generated changes, in parallel
+    llm_changes = [(i, c) for i, c in enumerate(changes) if c.get("source") == "llm"]
+    if not llm_changes:
+        for c in changes:
+            c["validation"] = {"status": "verified", "l3_verdict": "algorithm",
+                               "confidence": 1.0}
+        return changes
 
-        validated.append(vc)
+    print(f"  L3 语义校验 ({len(llm_changes)} 条, {max_workers} 路并行)...")
+    client = OpenAI(api_key=api_key, base_url=base_url, timeout=300)
+    stats_lock = threading.Lock()
+    stats = {"confirmed": 0, "rejected": 0, "uncertain": 0}
+    completed = 0
 
-    print(f"  校验完成: {len(validated)} 条, "
+    def _validate_one(idx: int, change: dict) -> tuple[int, dict]:
+        result = _l3_validate(change, v1_full_text, v2_full_text,
+                              client, model, max_retries)
+        return idx, result
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(_validate_one, i, c): i for i, c in llm_changes}
+        for future in as_completed(futures):
+            idx, result = future.result()
+            with stats_lock:
+                verdict = result.get("verdict", "uncertain")
+                stats[verdict] = stats.get(verdict, 0) + 1
+                completed += 1
+                changes[idx]["_l3"] = result
+                if completed % 50 == 0:
+                    print(f"    校验进度: {completed}/{len(llm_changes)} "
+                          f"(confirmed={stats['confirmed']}, rejected={stats['rejected']}, "
+                          f"uncertain={stats['uncertain']})")
+
+    # Merge L2 + L3 into validation field
+    for change in changes:
+        l2 = change.pop("_l2", {})
+        l3 = change.pop("_l3", {})
+        change["validation"] = {**l2}
+        change["validation"].update({
+            "l3_verdict": l3.get("verdict", "skipped"),
+            "l3_reason": l3.get("reason", ""),
+            "l3_attempts": l3.get("attempts", 0),
+            "status": _status_from(l3.get("verdict"), change.get("source")),
+            "confidence": _conf_from(l3.get("verdict")),
+        })
+
+    print(f"  校验完成: {len(changes)} 条, "
           f"confirmed={stats['confirmed']}, rejected={stats['rejected']}, "
           f"uncertain={stats['uncertain']}")
 
-    return validated
+    return changes
+
+
+def _status_from(verdict: str, source: str) -> str:
+    if source != "llm":
+        return "verified"
+    return {"confirmed": "verified", "rejected": "rejected"}.get(verdict, "uncertain")
+
+
+def _conf_from(verdict: str) -> float:
+    return {"confirmed": 0.95, "rejected": 0.1}.get(verdict, 0.5)
 
 
 def _l2_check(change: dict, v1_text: str, v2_text: str) -> dict:
