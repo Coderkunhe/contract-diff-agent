@@ -88,12 +88,19 @@ def _build_pair_prompt(pair: AlignedPair) -> tuple[str, str] | None:
     )
 
 
-def _build_system_prompt() -> str:
+def _build_system_prompt(skip_risk: bool = False) -> str:
     cat_lines = "\n".join(
         f"- {c['id']}: {c['name']}（关注：{c['focus']}）"
         for c in RISK_CATEGORIES
     )
-    return IDENTIFIER_SYSTEM.format(risk_categories=cat_lines)
+    prompt = IDENTIFIER_SYSTEM.format(risk_categories=cat_lines)
+    if skip_risk:
+        # Remove risk fields from the output schema
+        prompt = prompt.replace(
+            '"risk_categories": ["R01"],\n      "risk_level": "high|medium|low",\n      "risk_note": "通俗风险提示（50字以内）",\n      "attention_for": "建议关注部门或null",\n      "is_favorable": true/false/null',
+            '"risk_categories": [], "risk_level": "low", "risk_note": "", "attention_for": null, "is_favorable": null'
+        )
+    return prompt
 
 
 def _prefilter(pair: AlignedPair) -> list[dict] | None:
@@ -221,16 +228,18 @@ def identify_changes(
     max_tokens: int = 2000,
     max_workers: int = _MAX_WORKERS,
     on_change: callable = None,
+    skip_risk: bool = False,
 ) -> tuple[list[dict], dict[str, int]]:
-    """Run LLM diff + risk classification on aligned pairs IN PARALLEL.
+    """Run LLM diff on aligned pairs IN PARALLEL.
 
     Args:
-        on_change: Optional callback(change_dict) called for each new change.
-                   Used for SSE streaming in the web UI.
+        on_change: Optional callback(change_dict) for SSE streaming.
+        skip_risk: If True, only identify changes without risk classification.
+                   Used in --thorough mode for separate validation.
 
     Returns (changes, frequency_dict).
     """
-    system_prompt = _build_system_prompt()
+    system_prompt = _build_system_prompt(skip_risk=skip_risk)
     frequency: dict[str, int] = {}
 
     # Collect all pairs to process

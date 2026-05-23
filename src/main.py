@@ -26,10 +26,11 @@ def _load_env():
 
 def _run_v03(args, v1, v2, api_key: str, base_url: str, model: str,
              on_change: callable = None) -> dict:
-    """Full v0.3 pipeline: clause tree → align → identify → validate.
+    """Full pipeline: clause tree → align → identify → validate → classify.
 
     Args:
         on_change: Optional callback(change_dict) for SSE streaming.
+        args.thorough: If True, separate ③ diff and ⑤ risk for cross-validation.
     """
     from .clause_tree import build_clause_tree
     from .clause_aligner import align_clauses
@@ -46,12 +47,34 @@ def _run_v03(args, v1, v2, api_key: str, base_url: str, model: str,
     matched = sum(1 for p in diff_map.pairs if p.alignment_type == "match")
     print(f"   匹配: {matched} 对, 新增: {len(diff_map.v2_unmatched)}, 删除: {len(diff_map.v1_unmatched)}")
 
-    print(f"\n③ LLM 差异识别 + 风险分类 (并行)...")
-    raw_changes, frequency = identify_changes(
-        diff_map, api_key=api_key, model=model, base_url=base_url,
-        on_change=on_change,
-    )
-    print(f"   识别到 {len(raw_changes)} 条变化(含风险分类)")
+    thorough = getattr(args, "thorough", False)
+
+    if thorough:
+        print(f"\n③ LLM 差异识别 (严谨模式: 不含风险分类)...")
+        raw_changes, _ = identify_changes(
+            diff_map, api_key=api_key, model=model, base_url=base_url,
+            on_change=on_change, skip_risk=True,
+        )
+        print(f"   识别到 {len(raw_changes)} 条变化")
+
+        print(f"\n⑤ 独立风险分类 (严谨模式: 二次校验)...")
+        from .risk_classifier import classify_changes
+        raw_changes = classify_changes(
+            raw_changes, api_key=api_key, model=model, base_url=base_url,
+        )
+        # Recompute frequency from classified changes
+        frequency: dict[str, int] = {}
+        for c in raw_changes:
+            for cat_id in c.get("risk_categories", []):
+                frequency[cat_id] = frequency.get(cat_id, 0) + 1
+        print(f"   分类完成, {len(raw_changes)} 条变化已二次校验")
+    else:
+        print(f"\n③ LLM 差异识别 + 风险分类 (并行)...")
+        raw_changes, frequency = identify_changes(
+            diff_map, api_key=api_key, model=model, base_url=base_url,
+            on_change=on_change,
+        )
+        print(f"   识别到 {len(raw_changes)} 条变化(含风险分类)")
 
     # L2 validation (fast, always runs)
     from .validator import validate_changes as validate_l3
@@ -151,6 +174,8 @@ def main():
                         help="Claude model for LLM calls")
     parser.add_argument("--validate", "-V", action="store_true",
                         help="Enable L3 LLM semantic validation (slower but catches hallucinations)")
+    parser.add_argument("--thorough", action="store_true",
+                        help="Separate diff and risk classification for cross-validation (slower, higher quality)")
     parser.add_argument("--bilingual", action="store_true",
                         help="Keep bilingual content (English + Chinese)")
     parser.add_argument("--output", "-o", default=None, help="Output JSON file path")
