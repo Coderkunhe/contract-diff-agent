@@ -284,25 +284,10 @@ function resultsPage() {
     },
 
     downloadReport() {
-      if (!this.confirmed.length) return;
-      fetch('/api/results/' + window.location.pathname.split('/').pop() + '/json')
-        .then(r => r.json())
-        .then(data => {
-          const filtered = {
-            ...data,
-            changes: data.changes.filter(c => this.confirmed.includes(c.id)),
-            confirmation: {
-              confirmed_count: this.confirmed.length,
-              total: data.changes.length,
-              confirmed_at: new Date().toISOString(),
-            }
-          };
-          const blob = new Blob([JSON.stringify(filtered, null, 2)], {type: 'application/json'});
-          const a = document.createElement('a');
-          a.href = URL.createObjectURL(blob);
-          a.download = 'contract-diff-confirmed.json';
-          a.click();
-        });
+      const jobId = window.location.pathname.split('/').pop();
+      const ids = this.confirmed.join(',');
+      const url = '/api/results/' + jobId + '/pdf?ids=' + encodeURIComponent(ids);
+      window.open(url, '_blank');
     },
   }
 }

@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any, AsyncGenerator
 
 from fastapi import FastAPI, File, Form, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 # Ensure project root is on path
@@ -476,6 +476,108 @@ def results_page(job_id: str, request: Request):
 </div>"""
         html += f"<p class='text-xs text-slate-400 mt-4'>仅显示前 50 条，共 {len(changes)} 条</p></div></body></html>"
         return HTMLResponse(html, status_code=200)
+
+
+@app.get("/api/results/{job_id}/pdf")
+def results_pdf(job_id: str, ids: str = ""):
+    """Generate a PDF report of (confirmed) changes."""
+    with _JOBS_LOCK:
+        job = _JOBS.get(job_id)
+    result_path = job.get("result_path") if job else None
+    if not result_path or not os.path.exists(result_path):
+        fallback = _PROJECT_ROOT / "data" / "jobs" / f"{job_id}.json"
+        if fallback.exists():
+            result_path = str(fallback)
+    if not result_path or not os.path.exists(result_path):
+        return JSONResponse({"error": "not found"}, status_code=404)
+
+    with open(result_path, encoding="utf-8") as f:
+        data = json.load(f)
+
+    changes = data.get("changes", [])
+    confirmed_ids = [x for x in ids.split(",") if x] if ids else [c["id"] for c in changes]
+    filtered = [c for c in changes if c["id"] in confirmed_ids]
+
+    from fpdf import FPDF
+
+    pdf = FPDF()
+    pdf.add_font("CJK", "", "/System/Library/Fonts/PingFang.ttc", uni=True)
+    pdf.add_page()
+
+    # Title
+    pdf.set_font("CJK", "", 18)
+    pdf.cell(0, 12, "合同差异比对报告", align="C", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font("CJK", "", 10)
+    pdf.cell(0, 8, f"生成时间: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')} UTC", align="C", new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(6)
+
+    # Summary
+    s = data.get("diff_summary", {})
+    pdf.set_font("CJK", "", 12)
+    pdf.cell(0, 8, f"总差异: {s.get('total_changes', len(changes))}  |  高风险: {s.get('high_risk', '?')}  |  中风险: {s.get('medium_risk', '?')}  |  低风险: {s.get('low_risk', '?')}", align="C", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 8, f"本报告含 {len(filtered)} 条已确认变化", align="C", new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(6)
+
+    # Each change
+    for i, c in enumerate(filtered):
+        if i > 0:
+            pdf.ln(2)
+        # Separator
+        pdf.set_draw_color(200, 200, 200)
+        pdf.line(pdf.l_margin, pdf.get_y(), pdf.w - pdf.r_margin, pdf.get_y())
+        pdf.ln(3)
+
+        risk = c.get("risk_level", "low")
+        risk_label = {"high": "高风险", "medium": "中风险", "low": "低风险"}.get(risk, "")
+        type_label = {"added": "新增", "removed": "删除", "modified": "修改"}.get(c.get("change_type", ""), "")
+
+        # Header
+        pdf.set_font("CJK", "", 11)
+        pdf.cell(0, 7, f"{c.get('id', '')}  [{type_label}] [{risk_label}]", new_x="LMARGIN", new_y="NEXT")
+        if c.get("clause_ref_v2") or c.get("clause_ref_v1"):
+            pdf.set_font("CJK", "", 9)
+            pdf.set_text_color(100, 100, 100)
+            pdf.cell(0, 5, f"条款: {c.get('clause_ref_v2') or c.get('clause_ref_v1', '')}", new_x="LMARGIN", new_y="NEXT")
+            pdf.set_text_color(0, 0, 0)
+
+        # Brief
+        pdf.set_font("CJK", "", 10)
+        pdf.ln(1)
+        pdf.multi_cell(0, 6, c.get("brief", ""), max_lines=3)
+
+        # Snippets
+        v1 = c.get("v1_snippet", "")
+        v2 = c.get("v2_snippet", "")
+        if v1 or v2:
+            pdf.ln(1)
+            pdf.set_font("CJK", "", 8)
+            pdf.set_fill_color(245, 245, 245)
+            if v1:
+                pdf.cell(0, 5, f"V1: {v1[:200]}", new_x="LMARGIN", new_y="NEXT", fill=True)
+            if v2:
+                pdf.cell(0, 5, f"V2: {v2[:200]}", new_x="LMARGIN", new_y="NEXT", fill=True)
+
+        # Risk note
+        note = c.get("risk_note", "")
+        if note:
+            pdf.ln(1)
+            pdf.set_font("CJK", "", 9)
+            if risk == "high":
+                pdf.set_text_color(180, 40, 40)
+            elif risk == "medium":
+                pdf.set_text_color(180, 120, 20)
+            else:
+                pdf.set_text_color(80, 80, 80)
+            pdf.multi_cell(0, 5, f"风险提示: {note}", max_lines=4)
+            pdf.set_text_color(0, 0, 0)
+
+        # Check page break
+        if pdf.get_y() > 240 and i < len(filtered) - 1:
+            pdf.add_page()
+
+    pdf_bytes = pdf.output()
+    return Response(content=pdf_bytes, media_type="application/pdf",
+                    headers={"Content-Disposition": f"attachment; filename=contract-diff-report.pdf"})
 
 
 @app.get("/api/results/{job_id}/json")
