@@ -9,6 +9,7 @@ from typing import Any
 
 from json_repair import repair_json
 
+from src.config import get_config
 from src.constants.risks import RISK_CATEGORIES
 from src.llm.client import AutoFallbackClient
 from src.prompts.classifier import build_classifier_prompt
@@ -20,12 +21,15 @@ def classify_changes(
     api_key: str,
     model: str = "anthropic/claude-sonnet-4.6",
     base_url: str = "https://api.gmi-serving.com/v1",
-    batch_size: int = 25,
+    batch_size: int | None = None,
 ) -> list[dict]:
+    cfg = get_config()
+    if batch_size is None:
+        batch_size = cfg.llm_batch_size
     if not changes:
         return []
 
-    client = AutoFallbackClient(primary_model=model, timeout=300.0)
+    client = AutoFallbackClient(primary_model=model, timeout=cfg.llm_timeout)
     system_prompt = build_classifier_prompt()
 
     frequency: dict[str, int] = {c["id"]: 0 for c in RISK_CATEGORIES}
@@ -52,7 +56,7 @@ def classify_changes(
 
         try:
             response = client.create(
-                max_tokens=2500,
+                max_tokens=cfg.classify_max_tokens,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},

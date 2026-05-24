@@ -16,11 +16,11 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from json_repair import repair_json
 
 from .alignment import DiffMap
+from src.config import get_config
 from src.constants.risks import RISK_CATEGORIES
 from src.llm.client import AutoFallbackClient
 from src.prompts.identifier import build_enhance_system_prompt, build_enhance_user_prompt
 
-_MAX_WORKERS = 5
 _COUNTER_LOCK = threading.Lock()
 
 
@@ -30,8 +30,8 @@ def enhance_changes(
     api_key: str,
     model: str = "anthropic/claude-sonnet-4.6",
     base_url: str = "https://api.gmi-serving.com/v1",
-    max_tokens: int = 2000,
-    max_workers: int = _MAX_WORKERS,
+    max_tokens: int | None = None,
+    max_workers: int | None = None,
     on_change: callable = None,
 ) -> tuple[list[dict], dict[str, int]]:
     """Enrich traditional diff output with LLM natural language + risk classification.
@@ -41,6 +41,12 @@ def enhance_changes(
 
     Returns (enriched_changes, frequency_dict).
     """
+    cfg = get_config()
+    if max_tokens is None:
+        max_tokens = cfg.enhance_max_tokens
+    if max_workers is None:
+        max_workers = cfg.enhance_workers
+
     if not base_changes:
         return [], {}
 
@@ -72,7 +78,7 @@ def enhance_changes(
             )
 
     system_prompt = build_enhance_system_prompt()
-    client = AutoFallbackClient(primary_model=model, timeout=300.0)
+    client = AutoFallbackClient(primary_model=model, timeout=cfg.llm_timeout)
 
     enriched_all: list[dict] = []
     items = list(groups.items())
@@ -164,8 +170,8 @@ def identify_changes(
     api_key: str,
     model: str = "anthropic/claude-sonnet-4.6",
     base_url: str = "https://api.gmi-serving.com/v1",
-    max_tokens: int = 2000,
-    max_workers: int = _MAX_WORKERS,
+    max_tokens: int | None = None,
+    max_workers: int | None = None,
     on_change: callable = None,
     skip_risk: bool = False,
 ) -> tuple[list[dict], dict[str, int]]:

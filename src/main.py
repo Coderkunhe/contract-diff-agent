@@ -12,16 +12,9 @@ import argparse
 from datetime import datetime, timezone
 from pathlib import Path
 
-from dotenv import load_dotenv
-
+from .config import get_config
 from .pipeline.extraction import extract_contract, estimate_tokens
 from .pipeline.diff import diff_contracts
-
-
-def _load_env():
-    env_path = Path(__file__).resolve().parent.parent / ".env"
-    if env_path.exists():
-        load_dotenv(env_path)
 
 
 def _run_v04(args, v1, v2, api_key: str, base_url: str, model: str,
@@ -198,7 +191,8 @@ def _run_v02(args, v1, v2, api_key: str, base_url: str, model: str) -> dict:
 
 
 def main():
-    _load_env()
+    cfg = get_config()
+
     parser = argparse.ArgumentParser(
         description="Contract Diff Agent - Identify changes between two contract versions"
     )
@@ -208,8 +202,8 @@ def main():
                         help="Pipeline: v04 (traditional+LLM, default), v03 (legacy LLM), v02 (full-text LLM)")
     parser.add_argument("--mode", "-m", choices=["text", "llm"],
                         help="[deprecated] Use --pipeline instead")
-    parser.add_argument("--model", default=os.environ.get("CLAUDE_MODEL", "anthropic/claude-sonnet-4.6"),
-                        help="Claude model for LLM calls")
+    parser.add_argument("--model", default=cfg.model,
+                        help=f"Model for LLM calls (default: {cfg.model})")
     parser.add_argument("--validate", "-V", action="store_true",
                         help="Enable L3 LLM semantic validation (slower but catches hallucinations)")
     parser.add_argument("--thorough", action="store_true",
@@ -243,8 +237,8 @@ def main():
         if saved > 0:
             print(f"英文内容已过滤, 节省 ~{saved:,} tokens")
 
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    base_url = os.environ.get("GMI_BASE_URL", "https://api.gmi-serving.com/v1")
+    api_key = cfg.api_key
+    base_url = cfg.base_url
 
     # Route to pipeline
     if args.pipeline == "text" or args.mode == "text":
@@ -252,13 +246,13 @@ def main():
         result = diff_contracts(v1, v2)
     elif args.pipeline == "v02":
         if not api_key and not args.offline:
-            print("❌ v02 需要 ANTHROPIC_API_KEY (或用 --offline 降级到 v04)")
+            print("❌ v02 需要 API Key (请设置 LLM_API_KEY 环境变量，或用 --offline 降级到 v04)")
             sys.exit(1)
         print(f"\n🔍 LLM 全文比对 (v0.2)...")
         result = _run_v02(args, v1, v2, api_key, base_url, args.model)
     elif args.pipeline == "v03":
         if not api_key and not args.offline:
-            print("❌ v03 需要 ANTHROPIC_API_KEY (或用 --offline 降级到 v04)")
+            print("❌ v03 需要 API Key (请设置 LLM_API_KEY 环境变量，或用 --offline 降级到 v04)")
             sys.exit(1)
         from .pipeline.parsing import build_clause_tree
         from .pipeline.alignment import align_clauses
@@ -311,9 +305,8 @@ def main():
 
     # Write output
     json_str = json.dumps(result, ensure_ascii=False, indent=2)
-    out_path = args.output or "data/diff_result.json"
-    with open(out_path, "w", encoding="utf-8") as f:
-        f.write(json_str)
+    out_path = cfg.resolve_output(args.output)
+    out_path.write_text(json_str, encoding="utf-8")
     print(f"\n✅ 结果已写入: {out_path}")
 
 

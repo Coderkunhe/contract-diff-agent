@@ -100,6 +100,7 @@
          x-transition:enter-start="opacity-0 -translate-y-2"
          x-transition:enter-end="opacity-100 translate-y-0"
          :class="'{{ change.risk_level }}' === 'high' ? 'border-l-[3px] border-l-red-400' : ''"
+         x-data="{ expanded: false }"
          data-change-id="{{ change.id }}">
       <div class="flex items-start gap-4">
         <!-- Risk badge -->
@@ -144,7 +145,7 @@
 
           <!-- Side-by-side snippets -->
           {% if change.v1_snippet or change.v2_snippet %}
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-2 mb-2" x-data="{ expanded: false }">
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-2 mb-2">
             <div class="bg-slate-50 rounded-lg p-2.5 border border-slate-100">
               <div class="text-[10px] text-slate-400 font-semibold uppercase tracking-wider mb-1">{{ job.v1_filename }}</div>
               <div class="text-xs text-slate-600 leading-relaxed whitespace-pre-wrap" :class="expanded ? '' : 'line-clamp-2'">{{ change.v1_snippet or '（无对应条款）' }}</div>
@@ -153,8 +154,6 @@
               <div class="text-[10px] text-slate-400 font-semibold uppercase tracking-wider mb-1">{{ job.v2_filename }}</div>
               <div class="text-xs text-slate-600 leading-relaxed whitespace-pre-wrap" :class="expanded ? '' : 'line-clamp-2'">{{ change.v2_snippet or '（无对应条款）' }}</div>
             </div>
-            <button @click="expanded = !expanded" class="col-span-full text-center text-xs text-brand-600 hover:text-brand-700 font-medium transition-colors"
-                    x-text="expanded ? '收起 ▲' : '展开全文 ▼'"></button>
           </div>
           {% endif %}
 
@@ -168,46 +167,47 @@
           </div>
           {% endif %}
 
-          <!-- Meta + Confirm -->
-          <div class="flex items-center gap-2 flex-wrap justify-between">
-            <div class="flex items-center gap-2 flex-wrap">
-              {% for cat_name in change.risk_category_names %}
-              <span class="text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-md font-medium">{{ cat_name }}</span>
-              {% endfor %}
-              {% if change.attention_for %}
-              <span class="text-[10px] text-slate-400">👤 {{ change.attention_for }}</span>
-              {% endif %}
-            </div>
-            <div class="flex-shrink-0">
-              <button @click="toggleOne('{{ change.id }}')"
-                      class="px-3 py-1.5 rounded-lg text-xs font-medium border-2 transition-all duration-200 min-w-[72px]"
-                      :class="isConfirmed('{{ change.id }}') ? 'bg-emerald-500 border-emerald-500 text-white shadow-sm' : 'border-amber-300 text-amber-500 hover:border-emerald-400 hover:text-emerald-600'">
-                <span x-text="isConfirmed('{{ change.id }}') ? '✓ 已确认' : '待确认'"></span>
-              </button>
+          <!-- Meta tags -->
+          <div class="flex items-center gap-2 flex-wrap mb-2">
+            {% for cat_name in change.risk_category_names %}
+            <span class="text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-md font-medium">{{ cat_name }}</span>
+            {% endfor %}
+            {% if change.attention_for %}
+            <span class="text-[10px] text-slate-400">👤 {{ change.attention_for }}</span>
+            {% endif %}
+          </div>
+
+          <!-- Human note (always visible, auto-saves on blur) -->
+          <div class="mb-3">
+            <textarea x-model="notes['{{ change.id }}']"
+                      @blur="saveNote('{{ change.id }}')"
+                      class="w-full text-xs border border-slate-200 rounded-lg px-3 py-2 focus:border-brand-400 focus:ring-1 focus:ring-brand-200 outline-none resize-y min-h-[48px]"
+                      placeholder="添加备注（点击其他地方自动保存）"
+                      rows="2"></textarea>
+            <div class="flex items-center gap-2 mt-1">
+              <span x-show="saveMsg === '{{ change.id }}'" x-transition
+                    class="text-[10px] text-emerald-500">✓ 已保存</span>
+              <span x-show="getNote('{{ change.id }}') && saveMsg !== '{{ change.id }}'"
+                    class="text-[10px] text-slate-400">
+                <span x-text="getNote('{{ change.id }}').length"></span> 字
+              </span>
             </div>
           </div>
 
-          <!-- Human note -->
-          <div class="mt-2" x-data="{ noteOpen: false }">
-            <button @click="noteOpen = !noteOpen"
-                    class="text-[11px] text-slate-400 hover:text-brand-600 transition-colors font-medium">
-              <span x-text="noteOpen ? '收起备注 ▲' : (getNote('{{ change.id }}') ? '✎ 备注 (' + getNote('{{ change.id }}').length + '字) ▼' : '+ 添加备注 ▼')"></span>
+          <!-- Bottom bar: expand + confirm -->
+          <div class="flex items-center justify-between pt-2 border-t border-slate-100">
+            {% if change.v1_snippet or change.v2_snippet %}
+            <button @click="expanded = !expanded"
+                    class="text-xs text-slate-400 hover:text-brand-600 transition-colors font-medium"
+                    x-text="expanded ? '收起原文 ▲' : '展开全文 ▼'"></button>
+            {% else %}
+            <span></span>
+            {% endif %}
+            <button @click="toggleOne('{{ change.id }}')"
+                    class="px-3 py-1.5 rounded-lg text-xs font-medium border-2 transition-all duration-200 min-w-[72px]"
+                    :class="isConfirmed('{{ change.id }}') ? 'bg-emerald-500 border-emerald-500 text-white shadow-sm' : 'border-amber-300 text-amber-500 hover:border-emerald-400 hover:text-emerald-600'">
+              <span x-text="isConfirmed('{{ change.id }}') ? '✓ 已确认' : '待确认'"></span>
             </button>
-            <div x-show="noteOpen" x-transition class="mt-1.5">
-              <div class="flex gap-2 items-start">
-                <textarea x-model="notes['{{ change.id }}']"
-                          @blur="saveNote('{{ change.id }}')"
-                          class="flex-1 text-xs border border-slate-200 rounded-lg px-3 py-2 focus:border-brand-400 focus:ring-1 focus:ring-brand-200 outline-none resize-y min-h-[48px]"
-                          placeholder="备注（可选）— 失焦自动保存"
-                          rows="2"></textarea>
-                <button @click="saveNote('{{ change.id }}')"
-                        class="flex-shrink-0 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-brand-50 text-brand-600 hover:bg-brand-100 transition-colors">
-                  保存
-                </button>
-              </div>
-              <span x-show="saveMsg === '{{ change.id }}'" x-transition
-                    class="text-[10px] text-emerald-500">✓ 已保存</span>
-            </div>
           </div>
         </div>
       </div>

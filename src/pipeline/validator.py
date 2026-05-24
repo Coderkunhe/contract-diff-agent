@@ -13,10 +13,9 @@ from typing import Any
 
 from json_repair import repair_json
 
+from src.config import get_config
 from src.llm.client import AutoFallbackClient
 from src.prompts.validator import build_validator_prompt, VALIDATOR_SYSTEM
-
-_VALIDATE_MAX_WORKERS = 8
 
 
 def validate_changes(
@@ -26,9 +25,15 @@ def validate_changes(
     api_key: str,
     model: str = "anthropic/claude-sonnet-4.6",
     base_url: str = "https://api.gmi-serving.com/v1",
-    max_retries: int = 2,
-    max_workers: int = _VALIDATE_MAX_WORKERS,
+    max_retries: int | None = None,
+    max_workers: int | None = None,
 ) -> list[dict]:
+    cfg = get_config()
+    if max_retries is None:
+        max_retries = cfg.max_retries
+    if max_workers is None:
+        max_workers = cfg.validate_workers
+
     print(f"  L2 原文校验 ({len(changes)} 条)...")
     for change in changes:
         l2_result = _l2_check(change, v1_full_text, v2_full_text)
@@ -42,7 +47,7 @@ def validate_changes(
         return changes
 
     print(f"  L3 语义校验 ({len(llm_changes)} 条, {max_workers} 路并行)...")
-    client = AutoFallbackClient(primary_model=model, timeout=300.0)
+    client = AutoFallbackClient(primary_model=model, timeout=cfg.llm_timeout)
     stats_lock = threading.Lock()
     stats = {"confirmed": 0, "rejected": 0, "uncertain": 0}
     completed = 0
@@ -147,10 +152,11 @@ def _l3_validate(
 
     prompt = build_validator_prompt(v1_snippet, v2_snippet, claim)
 
+    cfg_valid = get_config()
     for attempt in range(1, max_retries + 1):
         try:
             response = client.create(
-                max_tokens=500,
+                max_tokens=cfg_valid.validate_max_tokens,
                 messages=[
                     {"role": "system", "content": VALIDATOR_SYSTEM},
                     {"role": "user", "content": prompt},

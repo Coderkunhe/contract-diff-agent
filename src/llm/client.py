@@ -4,17 +4,17 @@ Uses thread-local httpx clients to bypass macOS system proxy issues
 and avoid thread-safety problems under concurrent streaming load.
 """
 
-import os
 import threading
 from typing import Any
 
 import httpx
 from openai import OpenAI
 
+from src.config import AppConfig
 from .pool import (
     get_model_pool, get_next_available, is_model_available,
     mark_model_failure, mark_model_success,
-    MODEL_POOL, PROVIDER_CONFIGS,
+    MODEL_POOL,
 )
 
 
@@ -32,13 +32,12 @@ class AutoFallbackClient:
         if not hasattr(self._local, "clients"):
             self._local.clients = {}
         if provider not in self._local.clients:
-            cfg = PROVIDER_CONFIGS.get(provider, PROVIDER_CONFIGS["gmi"])
-            api_key = os.environ.get(cfg["api_key_env"], "")
-            base_url = os.environ.get(cfg["base_url_env"], cfg["default_base_url"])
+            api_key = AppConfig.get_api_key_for(provider)
+            base_url = AppConfig.get_base_url_for(provider)
             if not api_key:
                 raise RuntimeError(
                     f"Provider '{provider}' 的 API Key 未设置 "
-                    f"(环境变量: {cfg['api_key_env']})"
+                    f"(请设置 LLM_API_KEY 环境变量)"
                 )
             http_client = httpx.Client(trust_env=False, timeout=self._timeout)
             self._local.clients[provider] = OpenAI(

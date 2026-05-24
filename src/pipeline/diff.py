@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 
 from json_repair import repair_json
 
+from src.config import get_config
 from src.llm.client import AutoFallbackClient
 from src.prompts.diff import build_system_prompt, build_user_prompt
 from .extraction import ContractDocument, estimate_tokens
@@ -19,10 +20,13 @@ def run_llm_diff(
     v2: ContractDocument,
     api_key: str,
     model: str = "anthropic/claude-sonnet-4.6",
-    max_tokens: int = 3000,
+    max_tokens: int | None = None,
     base_url: str = "https://api.gmi-serving.com/v1",
 ) -> dict:
-    client = AutoFallbackClient(primary_model=model, timeout=300.0)
+    cfg = get_config()
+    if max_tokens is None:
+        max_tokens = cfg.llm_max_tokens
+    client = AutoFallbackClient(primary_model=model, timeout=cfg.llm_timeout)
 
     system_prompt = build_system_prompt()
     user_prompt = build_user_prompt(v1.full_text, v2.full_text)

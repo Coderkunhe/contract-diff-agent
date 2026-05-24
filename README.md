@@ -45,9 +45,23 @@ python -m src.main v1.pdf v2.pdf --offline -o result.json
 cp .env.example .env
 ```
 
-### 2. 配置 API Provider（可选，离线模式不需要）
+### 2. 配置 API（可选，离线模式不需要）
 
-项目支持两种 API 接入方式，**配一个就能跑**，两个都配则互为备份：
+**最小配置只需两行**：
+
+```bash
+LLM_API_KEY=sk-your-key-here
+LLM_MODEL=deepseek-chat
+```
+
+`LLM_MODEL` 决定 Provider（自动识别）：
+- `deepseek-*` → 直连 DeepSeek API (`https://api.deepseek.com/v1`)
+- 其他模型 ID → GMI 代理 (`https://api.gmi-serving.com/v1`)
+
+> ⚠️ **单模型风险提示**：本项目设计为多模型池架构——当前模型不可用时自动降级切换到备用模型。
+> **仅配置单一模型意味着系统无法自动降级**。后续功能升级（多模态合同分析、多角度校验等）
+> 可能依赖不同模型的互补能力，建议至少保留一个备用模型以保证高可用。
+> 如需多模型池，可为不同 Provider 设置独立的 Key（详见 `.env.example` 注释）。
 
 #### 方式 A：DeepSeek 直连（推荐，有免费额度）
 
@@ -59,16 +73,15 @@ cp .env.example .env
 | 模型 | `deepseek-chat`（V3 快）, `deepseek-reasoner`（R1 推理强） |
 
 ```bash
-DEEPSEEK_API_KEY=sk-xxxxxxxx
-CLAUDE_MODEL=deepseek-chat
+LLM_API_KEY=sk-xxxxxxxx
+LLM_MODEL=deepseek-chat
 ```
 
 #### 方式 B：GMI 多模型代理
 
 ```bash
-ANTHROPIC_API_KEY=你的GMI-JWT-Token
-GMI_BASE_URL=https://api.gmi-serving.com/v1
-CLAUDE_MODEL=anthropic/claude-sonnet-4.6
+LLM_API_KEY=你的GMI-JWT-Token
+LLM_MODEL=anthropic/claude-sonnet-4.6
 ```
 
 ### 3. 模型自动切换
@@ -83,6 +96,28 @@ CLAUDE_MODEL=anthropic/claude-sonnet-4.6
 | 4 | claude-opus-4.7 | GMI | 最强综合能力 |
 | 5 | Qwen/Qwen3.7-Max | GMI | 中文最优 |
 | 6-10 | GPT、GLM 等 | GMI | 兜底 |
+
+### 4. 可调参数
+
+所有参数均设有合理默认值，可按需在 `.env` 中覆盖：
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `LLM_MAX_TOKENS` | 3000 | LLM 单次调用最大输出 token |
+| `LLM_TIMEOUT` | 300 | HTTP 请求超时（秒） |
+| `LLM_BATCH_SIZE` | 25 | 风险分类批量大小 |
+| `CLASSIFY_MAX_TOKENS` | 2500 | 分类阶段 max_tokens |
+| `ENHANCE_MAX_TOKENS` | 2000 | 增强描述阶段 max_tokens |
+| `VALIDATE_MAX_TOKENS` | 500 | 校验阶段 max_tokens |
+| `MAX_RETRIES` | 3 | 单条 LLM 调用最大重试 |
+| `CHAPTER_RETRY_LIMIT` | 5 | 单章总循环上限 |
+| `CONFIDENCE_THRESHOLD` | 0.6 | 置信度阈值（低于此值标记 uncertain） |
+| `MODEL_COOLDOWN_BASE` | 30 | 模型失败冷却基数（秒，翻倍递增） |
+| `MODEL_COOLDOWN_MAX` | 300 | 模型冷却上限（秒） |
+| `ENHANCE_WORKERS` | 5 | 增强阶段并行度 |
+| `VALIDATE_WORKERS` | 8 | 校验阶段并行度 |
+| `MAX_JOBS` | 20 | Web 服务最大并发作业数 |
+| `DATA_DIR` | data | 数据存储目录 |
 
 ## 输出示例
 

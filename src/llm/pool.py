@@ -3,7 +3,6 @@
 Defines available models, provider configs, and per-model failure tracking.
 """
 
-import os
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -36,25 +35,25 @@ MODEL_POOL: list[dict[str, Any]] = [
      "provider": "gmi", "tags": ["fallback"]},
 ]
 
-PROVIDER_CONFIGS = {
+# Legacy PROVIDER_CONFIGS kept for reference — actual key resolution
+# now goes through src.config.AppConfig.get_api_key_for() / get_base_url_for().
+PROVIDER_CONFIGS: dict[str, dict[str, str]] = {
     "gmi": {
-        "api_key_env": "ANTHROPIC_API_KEY",
-        "base_url_env": "GMI_BASE_URL",
+        "api_key_env": "LLM_API_KEY",
+        "base_url_env": "LLM_BASE_URL",
         "default_base_url": "https://api.gmi-serving.com/v1",
     },
     "deepseek": {
-        "api_key_env": "DEEPSEEK_API_KEY",
-        "base_url_env": "DEEPSEEK_BASE_URL",
+        "api_key_env": "LLM_API_KEY",
+        "base_url_env": "LLM_BASE_URL",
         "default_base_url": "https://api.deepseek.com/v1",
     },
 }
 
 
 def get_primary_model() -> str:
-    configured = os.environ.get("CLAUDE_MODEL", "").strip()
-    if configured:
-        return configured
-    return MODEL_POOL[0]["id"]
+    from src.config import get_config
+    return get_config().model or MODEL_POOL[0]["id"]
 
 
 def get_model_pool(primary: str | None = None) -> list[str]:
@@ -85,10 +84,13 @@ def _get_stats(model_id: str) -> ModelStats:
 
 
 def mark_model_failure(model_id: str):
+    from src.config import get_config
+    cfg = get_config()
     s = _get_stats(model_id)
     s.failures += 1
     s.last_failure = time.time()
-    cooldown = min(30 * (2 ** (s.failures - 1)), 300)
+    cooldown = min(cfg.model_cooldown_base * (2 ** (s.failures - 1)),
+                   cfg.model_cooldown_max)
     s.cooldown_until = time.time() + cooldown
 
 

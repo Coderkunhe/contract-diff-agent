@@ -215,6 +215,7 @@ function streamer(jobId) {
         this.message = '全部完成';
         this._es.close();
         clearInterval(this._timer);
+        clearInterval(this._stageTimer);
       });
 
       this._es.addEventListener('error', (e) => {
@@ -226,6 +227,7 @@ function streamer(jobId) {
         }
         this._es.close();
         clearInterval(this._timer);
+        clearInterval(this._stageTimer);
       });
 
       this._es.onerror = () => {
@@ -238,7 +240,7 @@ function streamer(jobId) {
     _startStageAnim(stage) {
       // Fast stages: animate smoothly to 100%
       const fastStages = ['extracting', 'tree_building', 'aligning'];
-      const slowStages = ['identifying', 'validating', 'classifying'];
+      const slowStages = ['enhancing', 'identifying', 'validating', 'classifying'];
       clearInterval(this._stageTimer);
       if (fastStages.includes(stage)) {
         let p = 0;

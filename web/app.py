@@ -29,7 +29,7 @@ from fastapi.staticfiles import StaticFiles
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_PROJECT_ROOT))
 
-from src.config import AppConfig
+from src.config import AppConfig, get_config
 from src.pipeline.extraction import extract_contract
 from src.main import _run_v04
 
@@ -42,7 +42,8 @@ config = AppConfig.from_env()
 _LLM_ENABLED = bool(config.api_key)
 
 # ── Thread pool ───────────────────────────────────────────────────
-_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="diffworker")
+_executor = ThreadPoolExecutor(max_workers=config.web_workers,
+                               thread_name_prefix="diffworker")
 
 
 def _shutdown_executor():
@@ -55,7 +56,7 @@ atexit.register(_shutdown_executor)
 # ── Job store ─────────────────────────────────────────────────────
 _JOBS: dict[str, dict] = {}
 _JOBS_LOCK = threading.Lock()
-_MAX_JOBS = 20
+_MAX_JOBS = config.max_jobs
 
 _JOB_STATUS_STEPS = {
     "queued": (0, "排队中"),
