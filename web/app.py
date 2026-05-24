@@ -18,7 +18,7 @@ import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any, AsyncGenerator
 
@@ -29,6 +29,8 @@ from fastapi.staticfiles import StaticFiles
 # Ensure project root is on path
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_PROJECT_ROOT))
+
+CHINA_TZ = timezone(timedelta(hours=8))
 
 from src.config import AppConfig, get_config
 from src.pipeline.extraction import extract_contract
@@ -309,7 +311,10 @@ def _render(name: str, **ctx) -> HTMLResponse:
     env = Environment(loader=FileSystemLoader(str(templates_dir)))
     template = env.get_template(name)
     ctx.setdefault("version", getattr(src, "__version__", "1.0.0"))
-    return HTMLResponse(template.render(**ctx))
+    return HTMLResponse(
+        template.render(**ctx),
+        headers={"Cache-Control": "no-store, no-cache, must-revalidate"},
+    )
 
 
 # ── Routes ───────────────────────────────────────────────────────
@@ -497,10 +502,12 @@ def results_page(job_id: str, request: Request):
     from src.constants.risks import RISK_CATEGORIES
     cat_map = {c["id"]: c["name"] for c in RISK_CATEGORIES}
 
-    # Enrich changes with category names
+    # Enrich changes with category names, ensure risk_categories exists
     for change in data.get("changes", []):
+        if not change.get("risk_categories"):
+            change["risk_categories"] = []
         change["risk_category_names"] = [
-            cat_map.get(cid, cid) for cid in change.get("risk_categories", [])
+            cat_map.get(cid, cid) for cid in change["risk_categories"]
         ]
         change["_change_icon"] = {
             "added": "+", "removed": "−", "modified": "~"
@@ -510,6 +517,11 @@ def results_page(job_id: str, request: Request):
     freq = data.get("risk_taxonomy_snapshot", {}).get("frequency", {})
     sorted_freq = sorted(freq.items(), key=lambda x: x[1], reverse=True)[:8]
     max_freq_val = sorted_freq[0][1] if sorted_freq else 1
+
+    # Ensure risk taxonomy snapshot has categories for template rendering
+    rts = data.get("risk_taxonomy_snapshot", {})
+    if not rts.get("categories"):
+        rts["categories"] = RISK_CATEGORIES
 
     # Extract existing human verdicts for UI init
     verdicts = {}
@@ -613,6 +625,223 @@ def _find_cjk_font() -> str | None:
     return None
 
 
+def _map_v2_pages(v2_path: str, changes: list[dict]) -> dict[str, int]:
+    """Map change IDs to V2 page numbers by matching v2_snippet against V2 PDF.
+
+    Used as fallback when pipeline didn't already compute v2_page.
+    """
+    if not v2_path or not os.path.exists(v2_path):
+        return {}
+
+    try:
+        v2_doc = extract_contract(v2_path, keep_english=True)
+        page_texts = [p.text for p in v2_doc.pages]
+    except Exception:
+        try:
+            import pdfplumber
+            page_texts = []
+            with pdfplumber.open(v2_path) as pdf:
+                for page in pdf.pages:
+                    page_texts.append(page.extract_text() or "")
+        except Exception:
+            return {}
+
+    if not page_texts:
+        return {}
+
+    def _norm(t):
+        return "".join(t.split())
+
+    mapping: dict[str, int] = {}
+    for c in changes:
+        snippet = (c.get("v2_snippet") or "").strip()
+        if not snippet:
+            continue
+        norm_s = _norm(snippet)
+        cid = c.get("id", "")
+        for pi, pt in enumerate(page_texts):
+            if snippet in pt:
+                mapping[cid] = pi + 1
+                break
+            if norm_s and norm_s in _norm(pt):
+                mapping[cid] = pi + 1
+                break
+            if len(norm_s) >= 40 and norm_s[:40] in _norm(pt):
+                mapping[cid] = pi + 1
+                break
+
+    return mapping
+
+
+def _render_page_paragraphs(pdf, page_text: str):
+    """Render a page's text as properly formatted paragraphs.
+
+    Universal merge-then-render: mid-sentence line breaks (lines not ending
+    with sentence-ending punctuation) are always merged, regardless of source
+    format.  Blank lines serve as paragraph separators when present; when
+    absent the whole page is one logical paragraph.
+    """
+    import re
+
+    raw_lines = page_text.split("\n")
+    sentence_ends = {"。", "；", "）", ")", "》", "？", "！", "：", ":", "”"}
+
+    # Regex for section headers
+    section_pattern = re.compile(
+        r"^[（(]?[一二三四五六七八九十]+[）)]?\s*[、．.]\s*"
+        r"|^第[一二三四五六七八九十\d]+[章节条]\s*"
+    )
+
+    # ①  Group into paragraphs (blank-line separation when present)
+    has_blank_lines = any(not l.strip() for l in raw_lines)
+    paragraphs: list[list[str]] = []
+    if has_blank_lines:
+        current: list[str] = []
+        for line in raw_lines:
+            stripped = line.strip()
+            if not stripped:
+                if current:
+                    paragraphs.append(current)
+                    current = []
+            else:
+                current.append(stripped)
+        if current:
+            paragraphs.append(current)
+    else:
+        # No blank lines — treat the whole page as one paragraph
+        non_empty = [l.strip() for l in raw_lines if l.strip()]
+        if non_empty:
+            paragraphs = [non_empty]
+
+    # ②  Merge mid-sentence breaks within each paragraph, then render
+    cell_w = pdf.epw
+    for pi, para_lines in enumerate(paragraphs):
+        if pi > 0:
+            pdf.ln(3)
+
+        merged: list[str] = []
+        for line in para_lines:
+            if merged and merged[-1] and merged[-1][-1] not in sentence_ends:
+                # Join with space only between two Latin-script boundaries
+                # to avoid "thisAgreement" while keeping Chinese "为一体".
+                prev_ch = merged[-1][-1]
+                curr_ch = line[0] if line else ""
+                sep = " " if (prev_ch.isascii() and prev_ch.isalpha() and
+                              curr_ch.isascii() and curr_ch.isalpha()) else ""
+                merged[-1] += sep + line
+            else:
+                merged.append(line)
+        full_text = "".join(merged)
+
+        is_header = bool(section_pattern.match(full_text)) and len(full_text) < 80
+        if is_header:
+            pdf.set_font("CJK", "", 11)
+            pdf.set_text_color(40, 40, 40)
+            pdf.multi_cell(cell_w, 7, full_text)
+            pdf.ln(1)
+        else:
+            pdf.set_font("CJK", "", 9)
+            pdf.set_text_color(60, 60, 60)
+            pdf.multi_cell(cell_w, 5.5, full_text)
+
+    pdf.set_text_color(0, 0, 0)
+
+
+def _render_v2_original(
+    pdf,
+    v2_path: str | None,
+    v2_name: str,
+    pdf_pages: dict[int, int],
+):
+    """Render V2 original contract text page by page.
+
+    Tracks which PDF page each original V2 page lands on so diff items
+    can link back to the correct page. Supports both PDF and DOCX.
+    """
+    if not v2_path or not os.path.exists(v2_path):
+        return
+
+    # Extract V2 page texts using the same pipeline extraction (handles PDF + DOCX)
+    try:
+        v2_doc = extract_contract(v2_path, keep_english=True)
+        v2_page_texts = [p.text for p in v2_doc.pages]
+    except Exception:
+        # Fallback: try pdfplumber for PDFs
+        try:
+            import pdfplumber
+            v2_page_texts = []
+            with pdfplumber.open(v2_path) as v2_pdf:
+                for page in v2_pdf.pages:
+                    v2_page_texts.append(page.extract_text() or "")
+        except Exception:
+            # Last resort: treat as single-page plain text
+            try:
+                text = Path(v2_path).read_text(encoding="utf-8", errors="replace")
+                v2_page_texts = [text]
+            except Exception:
+                v2_page_texts = []
+
+    if not v2_page_texts:
+        # Render fallback message
+        pdf.ln(10)
+        pdf.set_font("CJK", "", 14)
+        pdf.set_text_color(150, 150, 150)
+        pdf.cell(0, 10, "（无法提取原文内容）", align="C", new_x="LMARGIN", new_y="NEXT")
+        pdf.set_text_color(0, 0, 0)
+        return
+
+    # ── Section header ──
+    pdf.ln(4)
+    pdf.set_font("CJK", "", 20)
+    pdf.cell(0, 12, "V2 合同原文", align="C", new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(2)
+    pdf.set_font("CJK", "", 10)
+    pdf.set_text_color(100, 100, 100)
+    pdf.cell(0, 7, f"文件: {v2_name}", align="C", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 7, f"共 {len(v2_page_texts)} 页", align="C", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_text_color(0, 0, 0)
+    pdf.ln(6)
+    pdf.set_draw_color(52, 73, 245)
+    pdf.set_line_width(0.6)
+    pdf.line(pdf.l_margin + 40, pdf.get_y(), pdf.w - pdf.r_margin - 40, pdf.get_y())
+    pdf.ln(8)
+
+    # ── Render each V2 page ──
+    for i, page_text in enumerate(v2_page_texts):
+        orig_page = i + 1
+
+        # Ensure page label lands at top of a page when space is tight.
+        # If there's < 80 mm left, start a fresh page (a typical V2 page
+        # needs ~14 lines × 5.5mm ≈ 77mm).
+        space_avail = pdf.h - pdf.b_margin - pdf.get_y()
+        if space_avail < 80:
+            pdf.add_page()
+
+        # Record current PDF page for link targeting
+        pdf_pages[orig_page] = pdf.page
+
+        # Page label — prominent header with rules above & below
+        if i > 0:
+            pdf.ln(2)
+        pdf.set_draw_color(200, 210, 225)
+        pdf.set_line_width(0.5)
+        pdf.line(pdf.l_margin + 60, pdf.get_y(), pdf.w - pdf.r_margin - 60, pdf.get_y())
+        pdf.ln(3)
+        pdf.set_font("CJK", "", 11)
+        pdf.set_text_color(80, 90, 110)
+        pdf.cell(0, 8, f"V2 第 {orig_page} 页", align="C", new_x="LMARGIN", new_y="NEXT")
+        pdf.set_text_color(0, 0, 0)
+        pdf.ln(2)
+        pdf.set_draw_color(200, 210, 225)
+        pdf.set_line_width(0.3)
+        pdf.line(pdf.l_margin + 60, pdf.get_y(), pdf.w - pdf.r_margin - 60, pdf.get_y())
+        pdf.ln(5)
+
+        # Render paragraphs with proper formatting
+        _render_page_paragraphs(pdf, page_text)
+        pdf.ln(4)
+
+
 def _generate_pdf(job_id: str, ids: str):
     """Generate a PDF report of (confirmed) changes."""
     with _JOBS_LOCK:
@@ -637,6 +866,27 @@ def _generate_pdf(job_id: str, ids: str):
     confirmed_ids = [x for x in ids.split(",") if x] if ids else [c["id"] for c in changes]
     filtered = [c for c in changes if c.get("id") in confirmed_ids]
 
+    # ── V2 page mapping ──
+    # Prefer pipeline-computed v2_page; fall back to runtime matching
+    v2_path = job.get("v2_path") if job else None
+    # Fallback: read v2_path from result JSON meta (job dict may not survive restart)
+    if not v2_path:
+        v2_path = data.get("meta", {}).get("contract_v2")
+    if v2_path and not os.path.exists(v2_path):
+        v2_path = None
+    v2_page_map: dict[str, int] = {}
+    for c in filtered:
+        if c.get("v2_page"):
+            v2_page_map[c["id"]] = c["v2_page"]
+    missing = [c for c in filtered if c["id"] not in v2_page_map]
+    if missing and v2_path:
+        fallback_map = _map_v2_pages(v2_path, missing)
+        v2_page_map.update(fallback_map)
+        for c in missing:
+            if c["id"] in fallback_map:
+                c["v2_page"] = fallback_map[c["id"]]
+
+
     from fpdf import FPDF
 
     font_path = _find_cjk_font()
@@ -657,31 +907,108 @@ def _generate_pdf(job_id: str, ids: str):
     safe_v1 = v1_base.replace(" ", "_")[:30]
     safe_v2 = v2_base.replace(" ", "_")[:30]
     pdf_filename = f"contract_diff_report.pdf"  # ASCII-safe filename
-    confirmed_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    confirmed_at = datetime.now(CHINA_TZ).strftime("%Y-%m-%d %H:%M 北京时间")
 
     pdf.add_page()
     pdf.set_auto_page_break(True, 20)
 
-    # ── Title ──
+    # ── ① Cover page ──
+    pdf.ln(20)
+    pdf.set_font("CJK", "", 24)
+    pdf.cell(0, 14, "合同差异比对报告", align="C", new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(4)
+    pdf.set_font("CJK", "", 11)
+    pdf.set_text_color(100, 100, 100)
+    pdf.cell(0, 8, f"确认时间: {confirmed_at}", align="C", new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(1)
+    pdf.cell(0, 8, f"对比文件: {v1_name}  vs  {v2_name}", align="C", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_text_color(0, 0, 0)
+    pdf.ln(10)
+    pdf.set_draw_color(52, 73, 245)
+    pdf.set_line_width(0.6)
+    pdf.line(pdf.l_margin + 40, pdf.get_y(), pdf.w - pdf.r_margin - 40, pdf.get_y())
+    pdf.ln(8)
+    pdf.set_font("CJK", "", 10)
+    pdf.set_text_color(140, 140, 140)
+    pdf.cell(0, 7, "本报告由合同慧眼自动生成", align="C", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_text_color(0, 0, 0)
+
+    # ── ② TOC page ──
+    toc_v2_link = pdf.add_link()
+    toc_diff_link = pdf.add_link()
+
+    pdf.add_page()
+    pdf.ln(16)
+    pdf.set_font("CJK", "", 24)
+    pdf.set_text_color(30, 30, 30)
+    pdf.cell(0, 16, "目  录", align="C", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_text_color(0, 0, 0)
+    pdf.ln(8)
+    # Decorative rule
+    pdf.set_draw_color(52, 73, 245)
+    pdf.set_line_width(1.0)
+    y_rule = pdf.get_y()
+    pdf.line(pdf.l_margin + 50, y_rule, pdf.w - pdf.r_margin - 50, y_rule)
+    pdf.ln(14)
+
+    # Entry 1: V2 original
+    pdf.set_font("CJK", "", 16)
+    pdf.set_text_color(52, 73, 245)
+    pdf.cell(0, 12, "1    V2 合同原文", link=toc_v2_link, new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(2)
+    pdf.set_font("CJK", "", 10)
+    pdf.set_text_color(140, 140, 140)
+    pdf.cell(0, 7, f"     {v2_name}", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_text_color(0, 0, 0)
+
+    pdf.ln(16)
+    pdf.set_draw_color(220, 220, 220)
+    pdf.set_line_width(0.3)
+    pdf.line(pdf.l_margin + 30, pdf.get_y(), pdf.w - pdf.r_margin - 30, pdf.get_y())
+    pdf.ln(14)
+
+    # Entry 2: Diff report
+    pdf.set_font("CJK", "", 16)
+    pdf.set_text_color(52, 73, 245)
+    pdf.cell(0, 12, "2    合同差异比对报告", link=toc_diff_link, new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(2)
+    pdf.set_font("CJK", "", 10)
+    pdf.set_text_color(140, 140, 140)
+    s = data.get("diff_summary", {})
+    pdf.cell(0, 7, f"     {s.get('total_changes', len(changes))} 条差异，{s.get('high_risk', 0)} 条高风险", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_text_color(0, 0, 0)
+
+    pdf.ln(20)
+    pdf.set_font("CJK", "", 9)
+    pdf.set_text_color(180, 180, 180)
+    pdf.cell(0, 6, "点击上方条目可直接跳转至对应章节", align="C", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_text_color(0, 0, 0)
+
+    # ── ③ V2 original text ──
+    v2_pdf_pages: dict[int, int] = {}  # v2 original page → pdf page
+    pdf.add_page()
+    pdf.set_link(toc_v2_link, page=pdf.page)
+    _render_v2_original(pdf, v2_path, v2_name, v2_pdf_pages)
+
+    # ── ④ Diff report ──
+    pdf.add_page()
+    pdf.set_link(toc_diff_link, page=pdf.page)
+
     pdf.ln(4)
     pdf.set_font("CJK", "", 20)
     pdf.cell(0, 12, "合同差异比对报告", align="C", new_x="LMARGIN", new_y="NEXT")
-    pdf.ln(2)
+    pdf.ln(3)
     pdf.set_font("CJK", "", 10)
     pdf.set_text_color(100, 100, 100)
-    pdf.cell(0, 7, f"确认时间: {confirmed_at}", align="C", new_x="LMARGIN", new_y="NEXT")
-    pdf.cell(0, 7, f"对比文件: {v1_name}  vs  {v2_name}", align="C", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 7, f"确认时间: {confirmed_at}  |  {v1_name}  vs  {v2_name}", align="C", new_x="LMARGIN", new_y="NEXT")
     pdf.set_text_color(0, 0, 0)
     pdf.ln(6)
-
-    # ── Horizontal rule ──
     pdf.set_draw_color(52, 73, 245)
     pdf.set_line_width(0.6)
     pdf.line(pdf.l_margin + 40, pdf.get_y(), pdf.w - pdf.r_margin - 40, pdf.get_y())
     pdf.ln(6)
 
     # ── Summary ──
-    s = data.get("diff_summary", {})
     pdf.set_font("CJK", "", 13)
     pdf.cell(0, 9, "比对概要", new_x="LMARGIN", new_y="NEXT")
     pdf.ln(3)
@@ -721,11 +1048,22 @@ def _generate_pdf(job_id: str, ids: str):
         pdf.cell(0, 8, f"{seq}. [{type_label}] [{risk_label}]", new_x="LMARGIN", new_y="NEXT")
         pdf.set_text_color(0, 0, 0)
 
-        # Clause ref
-        if c.get("clause_ref_v2") or c.get("clause_ref_v1"):
+        # Clause ref + V2 page link
+        ref_text = c.get("clause_ref_v2") or c.get("clause_ref_v1", "")
+        v2_page = v2_page_map.get(c.get("id", ""))
+        if ref_text or v2_page:
             pdf.set_font("CJK", "", 9)
             pdf.set_text_color(120, 120, 120)
-            pdf.cell(0, 6, f"> {c.get('clause_ref_v2') or c.get('clause_ref_v1', '')}", new_x="LMARGIN", new_y="NEXT")
+            line_text = f"> {ref_text}" if ref_text else ""
+            pdf.cell(0, 6, line_text, new_x="LMARGIN", new_y="NEXT")
+            if v2_page:
+                link_id = pdf.add_link()
+                target_pdf_page = v2_pdf_pages.get(v2_page)
+                if target_pdf_page:
+                    pdf.set_link(link_id, page=target_pdf_page)
+                pdf.set_font("CJK", "", 9)
+                pdf.set_text_color(52, 73, 245)
+                pdf.cell(0, 6, f"  → V2 第{v2_page}页", link=link_id, new_x="LMARGIN", new_y="NEXT")
             pdf.set_text_color(0, 0, 0)
         pdf.ln(2)
 
@@ -735,15 +1073,15 @@ def _generate_pdf(job_id: str, ids: str):
         pdf.ln(2)
 
         # Snippets
-        v1 = c.get("v1_snippet", "")
-        v2 = c.get("v2_snippet", "")
-        if v1 or v2:
+        vs1 = c.get("v1_snippet", "")
+        vs2 = c.get("v2_snippet", "")
+        if vs1 or vs2:
             pdf.set_font("CJK", "", 9)
             pdf.set_fill_color(248, 248, 250)
-            if v1:
-                pdf.cell(0, 6, f"  V1: {v1[:250]}", new_x="LMARGIN", new_y="NEXT", fill=True)
-            if v2:
-                pdf.cell(0, 6, f"  V2: {v2[:250]}", new_x="LMARGIN", new_y="NEXT", fill=True)
+            if vs1:
+                pdf.cell(0, 6, f"  V1: {vs1[:250]}", new_x="LMARGIN", new_y="NEXT", fill=True)
+            if vs2:
+                pdf.cell(0, 6, f"  V2: {vs2[:250]}", new_x="LMARGIN", new_y="NEXT", fill=True)
             pdf.ln(2)
 
         # Risk note
@@ -761,11 +1099,11 @@ def _generate_pdf(job_id: str, ids: str):
             pdf.ln(2)
 
         # Human note
-        note = c.get("human_note", "")
-        if note:
+        hn = c.get("human_note", "")
+        if hn:
             pdf.set_font("CJK", "", 9)
             pdf.set_text_color(80, 80, 160)
-            pdf.multi_cell(0, 6, f"[备注] {note}"[:300])
+            pdf.multi_cell(0, 6, f"[备注] {hn}"[:300])
             pdf.set_text_color(0, 0, 0)
             pdf.ln(2)
 
@@ -846,7 +1184,7 @@ async def update_verdicts(job_id: str, request: Request):
 
     updated = 0
     corrections = 0
-    now_ts = datetime.now(timezone.utc).isoformat()
+    now_ts = datetime.now(CHINA_TZ).isoformat()
 
     for change in data.get("changes", []):
         cid = change.get("id", "")
@@ -884,6 +1222,14 @@ async def update_verdicts(job_id: str, request: Request):
 
     with open(result_path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
+
+    # Re-extract learnings so verdict feedback shows in /learnings
+    try:
+        from src.pipeline.learning import extract_learning, save_learning
+        learning = extract_learning(data, job_id)
+        save_learning(learning)
+    except Exception as e:
+        print(f"[LEARNING] 判决后重新提取学习数据失败: {e}")
 
     return JSONResponse({"updated": updated, "corrections": corrections})
 
@@ -946,13 +1292,25 @@ def learnings_page():
     data_dir = _resolve_dir(None)
     index = _load_index(data_dir)
 
-    return _render(
-        "learnings.html.jinja2",
+    from jinja2 import Environment, FileSystemLoader
+    env = Environment(loader=FileSystemLoader(str(templates_dir)))
+    template = env.get_template("learnings.html.jinja2")
+    html = template.render(
         runs_json=_json.dumps(index.get("runs", []), ensure_ascii=False),
         trends_json=_json.dumps(index.get("global_trends", {}), ensure_ascii=False),
         total_runs=index.get("total_runs", 0),
         updated_at=index.get("updated_at", ""),
+        version=getattr(__import__("src"), "__version__", "1.0.0"),
     )
+    return HTMLResponse(html, headers={"Cache-Control": "no-store, no-cache, must-revalidate"})
+
+
+@app.get("/api/learnings", response_class=JSONResponse)
+def api_learnings():
+    """Raw learning index JSON — bypasses template for foolproof verification."""
+    from src.pipeline.learning import _load_index, _resolve_dir
+    index = _load_index(_resolve_dir(None))
+    return JSONResponse(index, headers={"Cache-Control": "no-store, no-cache, must-revalidate"})
 
 
 # ── Main ─────────────────────────────────────────────────────────

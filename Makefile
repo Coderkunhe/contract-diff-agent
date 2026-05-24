@@ -26,6 +26,9 @@ web:
 	$(PYTHON) -m web.app
 
 demo-data:
+	$(PYTHON) scripts/prepare_demo.py
+
+demo-reset:
 	$(PYTHON) scripts/prepare_demo.py --reset
 
 demo: demo-data

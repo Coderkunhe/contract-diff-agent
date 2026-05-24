@@ -17,6 +17,61 @@ from .pipeline.extraction import extract_contract, estimate_tokens
 from .pipeline.diff import diff_contracts
 
 
+def _match_v2_page(snippet: str, pages) -> int | None:
+    """Find which V2 page contains the given snippet text.
+
+    Uses a tiered strategy: exact match → normalized whitespace → keyword overlap.
+    Returns 1-indexed page number or None.
+    """
+    if not snippet or not pages:
+        return None
+
+    snippet = snippet.strip()
+    if not snippet:
+        return None
+
+    # Normalize whitespace for matching
+    def _norm(t):
+        return "".join(t.split())
+
+    norm_snippet = _norm(snippet)
+
+    # Tier 1: exact substring match in page text
+    for page in pages:
+        if snippet in page.text:
+            return page.page_num
+
+    # Tier 2: exact match in normalized text
+    for page in pages:
+        if norm_snippet and norm_snippet in _norm(page.text):
+            return page.page_num
+
+    # Tier 3: match with key phrases (first 40+ chars if snippet is long enough)
+    if len(norm_snippet) >= 40:
+        key = norm_snippet[:40]
+        for page in pages:
+            if key in _norm(page.text):
+                return page.page_num
+
+    # Tier 4: match by longest common keyword sequence
+    # Split into words/chars, find page with most keyword hits
+    keywords = [w for w in norm_snippet if w.strip()]
+    if len(keywords) >= 6:
+        best_page = None
+        best_score = 0
+        for page in pages:
+            norm_page = _norm(page.text)
+            score = sum(1 for kw in keywords if kw in norm_page)
+            if score > best_score:
+                best_score = score
+                best_page = page.page_num
+        # Require at least 50% keyword overlap
+        if best_score >= len(keywords) * 0.5:
+            return best_page
+
+    return None
+
+
 def _run_v04(args, v1, v2, api_key: str, base_url: str, model: str,
              on_change: callable = None, on_progress: callable = None) -> dict:
     """v0.4 pipeline: traditional diff (always) → LLM enhance (optional) → validate → classify.
@@ -125,6 +180,13 @@ def _run_v04(args, v1, v2, api_key: str, base_url: str, model: str,
             validated.append(c_with_val)
 
     print(f"   校验完成: {len(validated)} 条")
+
+    # ⑥.5 匹配 v2_page（在 v2.pages 中搜索每个 change 的 v2_snippet）
+    for c in validated:
+        c["v2_page"] = _match_v2_page(c.get("v2_snippet", ""), v2.pages)
+
+    matched_pages = sum(1 for c in validated if c.get("v2_page"))
+    print(f"   页码匹配: {matched_pages}/{len(validated)} 条定位到 V2 页码")
 
     # ⑦ 构建最终结果
     from .pipeline.classifier import save_taxonomy

@@ -4,7 +4,10 @@
 {% set summary = data.diff_summary %}
 {% set changes = data.changes %}
 
-<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8" x-data="resultsPage()" x-init="initVerdicts({{ verdicts_json | safe }})">
+<script>
+window.__VERDICTS_INIT = {{ verdicts_json | safe }};
+</script>
+<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8" x-data="resultsPage()" x-init="initVerdicts(window.__VERDICTS_INIT)">
   <!-- Header -->
   <div class="flex flex-col sm:flex-row sm:items-end sm:justify-between mb-8 gap-4 animate-fade-in">
     <div>
@@ -26,26 +29,26 @@
 
   <!-- Stat cards -->
   <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-    <div class="bg-white rounded-2xl border border-slate-200 p-5 text-center animate-fade-in stagger-1">
+    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 text-center animate-fade-in stagger-1">
       <div class="text-5xl font-bold text-slate-800 tracking-tight">{{ summary.total_changes }}</div>
       <div class="text-xs text-slate-400 mt-1.5 font-medium">总差异</div>
     </div>
-    <div class="bg-red-50/60 rounded-2xl border border-red-200/60 p-5 text-center animate-fade-in stagger-2">
-      <div class="text-4xl font-bold text-red-600 tracking-tight">{{ summary.high_risk }}</div>
-      <div class="text-xs text-red-500 mt-1.5 font-medium">高风险</div>
+    <div class="bg-red-100 rounded-2xl border-2 border-red-300 shadow-sm p-5 text-center animate-fade-in stagger-2">
+      <div class="text-4xl font-bold text-red-700 tracking-tight">{{ summary.high_risk }}</div>
+      <div class="text-xs text-red-600 mt-1.5 font-semibold">高风险</div>
     </div>
-    <div class="bg-amber-50/60 rounded-2xl border border-amber-200/60 p-5 text-center animate-fade-in stagger-3">
-      <div class="text-4xl font-bold text-amber-600 tracking-tight">{{ summary.medium_risk }}</div>
-      <div class="text-xs text-amber-500 mt-1.5 font-medium">中风险</div>
+    <div class="bg-amber-100 rounded-2xl border-2 border-amber-300 shadow-sm p-5 text-center animate-fade-in stagger-3">
+      <div class="text-4xl font-bold text-amber-700 tracking-tight">{{ summary.medium_risk }}</div>
+      <div class="text-xs text-amber-600 mt-1.5 font-semibold">中风险</div>
     </div>
-    <div class="bg-emerald-50/60 rounded-2xl border border-emerald-200/60 p-5 text-center animate-fade-in stagger-4">
-      <div class="text-4xl font-bold text-emerald-600 tracking-tight">{{ summary.low_risk }}</div>
-      <div class="text-xs text-emerald-500 mt-1.5 font-medium">低风险</div>
+    <div class="bg-emerald-100 rounded-2xl border-2 border-emerald-300 shadow-sm p-5 text-center animate-fade-in stagger-4">
+      <div class="text-4xl font-bold text-emerald-700 tracking-tight">{{ summary.low_risk }}</div>
+      <div class="text-xs text-emerald-600 mt-1.5 font-semibold">低风险</div>
     </div>
   </div>
 
   <!-- Risk frequency -->
-  <div class="bg-white rounded-2xl border border-slate-200 p-6 mb-8 animate-fade-in stagger-5">
+  <div class="bg-white rounded-2xl border-2 border-slate-200 shadow-sm p-6 mb-8 animate-fade-in stagger-5">
     <h3 class="text-sm font-semibold text-slate-700 mb-4">风险类别分布</h3>
     <div class="space-y-3">
       {% for name, count in sorted_freq %}
@@ -63,7 +66,7 @@
   </div>
 
   <!-- Filter bar -->
-  <div class="sticky top-14 z-40 bg-white/90 backdrop-blur-md rounded-2xl border border-slate-200 p-4 mb-6 flex flex-wrap items-center gap-3 animate-fade-in stagger-6">
+  <div class="sticky top-14 z-40 bg-white/95 backdrop-blur-md rounded-2xl border-2 border-slate-200 shadow-sm p-4 mb-6 flex flex-wrap items-center gap-3 animate-fade-in stagger-6">
     <span class="text-[11px] text-slate-400 font-semibold uppercase tracking-wider">风险</span>
     <button @click="riskFilter = 'all'" class="px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-200"
             :class="riskFilter === 'all' ? 'bg-slate-800 text-white shadow-sm' : 'bg-slate-50 text-slate-500 hover:bg-slate-100'">全部</button>
@@ -86,8 +89,12 @@
             :class="typeFilter === 'removed' ? 'bg-red-600 text-white shadow-sm' : 'bg-red-50 text-red-600 hover:bg-red-100'">删除</button>
 
     <div class="flex-1"></div>
-    <button @click="selectAll()" class="px-3 py-1.5 rounded-lg text-xs font-medium border border-slate-200 text-slate-500 hover:bg-slate-50 transition-colors"
-            x-text="allSelected ? '取消全选' : '全选'"></button>
+    <button @click="selectAll()"
+            class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-200"
+            :class="allSelected ? 'bg-brand-50 text-brand-700 border border-brand-200' : 'border border-slate-200 text-slate-500 hover:bg-slate-50'">
+      <span class="text-sm" x-text="allSelected ? '☑' : '☐'"></span>
+      <span x-text="allSelected ? '取消全选' : '全选'"></span>
+    </button>
     <span class="text-xs text-slate-400">显示 {{ changes | length }} 条</span>
   </div>
 
@@ -95,7 +102,7 @@
   <div class="hidden lg:block fixed right-[max(1rem,calc((100vw-80rem)/2-3.5rem))] top-[50%] -translate-y-1/2 z-50"
        x-show="changeItems.length > 0"
        x-transition>
-    <div class="relative bg-white/95 backdrop-blur-md rounded-2xl border border-slate-200 shadow-xl p-3 w-[68px] max-h-[60vh] overflow-hidden flex flex-col">
+    <div class="relative bg-white/98 backdrop-blur-md rounded-2xl border-2 border-slate-300 shadow-xl p-3 w-[68px] max-h-[60vh] flex flex-col">
 
       <!-- Tooltip: positioned to the left of nav bar -->
       <div class="absolute right-full mr-2 top-1/2 -translate-y-1/2 pointer-events-none"
@@ -109,28 +116,32 @@
 
       <div class="text-[10px] font-bold text-slate-500 text-center mb-2 flex-shrink-0"
            x-text="confirmedCount + '/' + changeItems.length"></div>
-      <div class="flex-1 overflow-y-auto scrollbar-thin">
+      <div class="flex-1 overflow-y-auto scrollbar-thin rounded-lg overflow-hidden">
         <div class="flex flex-col gap-[3px]">
           <template x-for="(item, idx) in changeItems" :key="item.id">
             <button @click="scrollTo(item.id); hoverIdx = idx"
                     @mouseenter="hoverIdx = idx"
                     @mouseleave="hoverIdx = null"
-                    class="w-full h-[9px] rounded-full transition-all duration-150 hover:scale-125 hover:ring-1 hover:ring-slate-300 cursor-pointer flex-shrink-0"
+                    class="w-full h-[14px] rounded-full transition-all duration-150 hover:scale-125 cursor-pointer flex-shrink-0"
                     :class="{
-                      'bg-emerald-400': isConfirmed(item.id),
-                      'bg-red-400': !isConfirmed(item.id) && item.risk === 'high',
-                      'bg-amber-400': !isConfirmed(item.id) && item.risk === 'medium',
-                      'bg-slate-300': !isConfirmed(item.id) && item.risk === 'low',
+                      'bg-red-400': isConfirmed(item.id) && item.risk === 'high',
+                      'bg-amber-400': isConfirmed(item.id) && item.risk === 'medium',
+                      'bg-emerald-400': isConfirmed(item.id) && item.risk === 'low',
+                      'bg-white ring-2 ring-red-400': !isConfirmed(item.id) && item.risk === 'high',
+                      'bg-white ring-2 ring-amber-400': !isConfirmed(item.id) && item.risk === 'medium',
+                      'bg-white ring-2 ring-slate-300': !isConfirmed(item.id) && item.risk === 'low',
                       'ring-2 ring-slate-500 scale-125': hoverIdx === idx
                     }"></button>
           </template>
         </div>
       </div>
       <div class="flex-shrink-0 mt-2 flex justify-center gap-[3px]">
-        <span class="w-2 h-2 rounded-full bg-emerald-400" title="已确认"></span>
-        <span class="w-2 h-2 rounded-full bg-red-400" title="高风险未确认"></span>
-        <span class="w-2 h-2 rounded-full bg-amber-400" title="中风险未确认"></span>
-        <span class="w-2 h-2 rounded-full bg-slate-300" title="低风险未确认"></span>
+        <span class="w-2 h-2 rounded-full bg-emerald-400" title="低风险已确认"></span>
+        <span class="w-2 h-2 rounded-full bg-amber-400" title="中风险已确认"></span>
+        <span class="w-2 h-2 rounded-full bg-red-400" title="高风险已确认"></span>
+        <span class="w-2 h-2 rounded-full bg-white ring-1 ring-red-400" title="高风险未确认"></span>
+        <span class="w-2 h-2 rounded-full bg-white ring-1 ring-amber-400" title="中风险未确认"></span>
+        <span class="w-2 h-2 rounded-full bg-white ring-1 ring-slate-300" title="低风险未确认"></span>
       </div>
     </div>
   </div>
@@ -138,13 +149,13 @@
   <!-- Changes list -->
   <div class="space-y-3">
     {% for change in changes %}
-    <div class="bg-white rounded-2xl border border-slate-200 p-6 transition-all duration-200 hover:shadow-md animate-fade-in stagger-{{ (loop.index % 8) + 1 if loop.index < 9 else 8 }}"
+    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 transition-all duration-200 hover:shadow-lg animate-fade-in stagger-{{ (loop.index % 8) + 1 if loop.index < 9 else 8 }}"
          x-show="match('{{ change.risk_level }}', '{{ change.change_type }}')"
          x-transition:enter="transition ease-out duration-300"
          x-transition:enter-start="opacity-0 -translate-y-2"
          x-transition:enter-end="opacity-100 translate-y-0"
          :class="'{{ change.risk_level }}' === 'high' ? 'border-l-[3px] border-l-red-400' : ''"
-         x-data="{ expanded: false }"
+         x-data="{ expanded: false, needsExpand: false }" x-init="$nextTick(() => { const clamped = $el.querySelectorAll('.line-clamp-2'); needsExpand = clamped.length > 0 && Array.from(clamped).some(el => el.scrollHeight > el.clientHeight); })"
          data-change-id="{{ change.id }}"
          data-risk="{{ change.risk_level }}"
          data-type="{{ change.change_type }}"
@@ -184,7 +195,7 @@
             <span class="text-[11px] text-red-600 font-medium">✗ 不利</span>
             {% endif %}
             {% if change.clause_ref_v2 or change.clause_ref_v1 %}
-            <span class="text-[10px] text-slate-400 font-mono ml-auto">{{ change.clause_ref_v2 or change.clause_ref_v1 }}</span>
+            <span class="text-[10px] text-slate-400 font-mono ml-auto">{{ change.clause_ref_v2 or change.clause_ref_v1 }}{% if change.v2_page %} (V2 第{{ change.v2_page }}页){% endif %}</span>
             {% endif %}
           </div>
 
@@ -244,14 +255,10 @@
 
           <!-- Bottom bar: expand + verdict -->
           <div class="flex items-center justify-between pt-2 border-t border-slate-100">
-            {% set show_expand = (change.v1_snippet or change.v2_snippet) and not (change.v1_snippet and change.v2_snippet and change.v1_snippet == change.v2_snippet) %}
-            {% if show_expand %}
-            <button @click="expanded = !expanded"
+            <button @click="expanded = !expanded" x-show="needsExpand"
                     class="text-xs text-slate-400 hover:text-brand-600 transition-colors font-medium"
                     x-text="expanded ? '收起原文 ▲' : '展开原文 ▼'"></button>
-            {% else %}
-            <span></span>
-            {% endif %}
+            <span x-show="!needsExpand"></span>
             <div class="flex items-center gap-1.5">
               <!-- Verdict badge (shown after verdict is set) -->
               <span x-show="getVerdict('{{ change.id }}')"
@@ -371,6 +378,7 @@ function resultsPage() {
     get rejectedCount() { return Object.values(this.verdicts).filter(v => v.action === 'rejected').length; },
     get correctedCount() { return Object.values(this.verdicts).filter(v => v.action === 'corrected').length; },
     get reviewedCount() { return Object.keys(this.verdicts).length; },
+    get allSelected() { return this.reviewedCount >= this.totalChanges; },
     get confirmPct() { return this.totalChanges ? Math.round(this.reviewedCount / this.totalChanges * 100) : 0; },
 
     // Floating nav: reactive change list respecting current filter
@@ -423,6 +431,10 @@ function resultsPage() {
 
     getVerdict(id) {
       return this.verdicts[id] || null;
+    },
+
+    isConfirmed(id) {
+      return !!(this.verdicts[id] && this.verdicts[id].action);
     },
 
     verdictLabel(action) {

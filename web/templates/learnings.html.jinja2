@@ -1,7 +1,14 @@
 {% extends "base.html.jinja2" %}
 {% block title %}进化记录 — 合同慧眼{% endblock %}
 {% block content %}
-<div class="max-w-6xl mx-auto px-4 py-12" x-data="learningsPage({ runs: {{ runs_json | safe }}, trends: {{ trends_json | safe }}, totalRuns: {{ total_runs }} })">
+<script>
+window.__LEARNINGS_INIT = {
+  runs: {{ runs_json | safe }},
+  trends: {{ trends_json | safe }},
+  totalRuns: {{ total_runs }}
+};
+</script>
+<div class="max-w-6xl mx-auto px-4 py-12" x-data="learningsPage(window.__LEARNINGS_INIT)">
 
   <!-- Page header -->
   <div class="text-center mb-10 animate-fade-in">
@@ -11,6 +18,12 @@
     <p class="text-slate-500 text-base max-w-lg mx-auto leading-relaxed">
       每次合同比对后自动提取经验，持续优化后续分析准确率
     </p>
+    {% if updated_at %}
+    <p class="text-[10px] text-slate-400 mt-1.5">
+      数据更新于 <span class="font-mono">{{ updated_at[:19].replace('T', ' ') }}</span>
+      <span class="text-brand-500 font-semibold ml-1">（每次硬刷新 Cmd+Shift+R 获取最新数据）</span>
+    </p>
+    {% endif %}
   </div>
 
   <!-- Summary bar -->

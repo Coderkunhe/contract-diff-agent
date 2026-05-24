@@ -18,6 +18,16 @@ from .pool import (
 )
 
 
+def _is_connectivity_error(exc: Exception) -> bool:
+    """Detect timeout/connection errors that indicate API unreachability."""
+    msg = str(exc).lower()
+    return any(kw in msg for kw in (
+        "timed out", "timeout", "connection refused", "connection reset",
+        "no route to host", "name resolution", "network is unreachable",
+        "remote disconnect", "connection error", "read error",
+    ))
+
+
 class AutoFallbackClient:
     """OpenAI-compatible client that auto-switches models AND providers on failure."""
 
@@ -56,6 +66,7 @@ class AutoFallbackClient:
     def create(self, **kwargs) -> Any:
         kwargs.pop("model", None)
         last_error = None
+        timeout_count = 0
 
         for attempt, model_id in enumerate(self._pool):
             if not is_model_available(model_id):
@@ -77,6 +88,17 @@ class AutoFallbackClient:
                 last_error = e
                 mark_model_failure(model_id)
                 err_str = str(e)[:100]
+
+                # Fast-fail: if multiple models timeout/connection-refused,
+                # the API is likely unreachable — abort early
+                if _is_connectivity_error(e):
+                    timeout_count += 1
+                if timeout_count >= 2:
+                    raise RuntimeError(
+                        f"多个模型连接失败，API 可能不可达。已跳过 {attempt + 1} 个模型。"
+                        f"最后错误: {err_str}"
+                    )
+
                 if attempt < len(self._pool) - 1:
                     print(f"  ⚠️ 模型 {model_id} 失败: {err_str} → 切换到下一模型...")
                 continue
@@ -114,6 +136,7 @@ class AutoFallbackClient:
                 return (model_id, provider, label, None, exc)
 
         errors: list[tuple[str, str]] = []
+        timeout_count = 0
         with ThreadPoolExecutor(max_workers=len(candidates)) as executor:
             futures = {executor.submit(_call_one, m): m for m in candidates}
             for future in as_completed(futures):
@@ -127,7 +150,13 @@ class AutoFallbackClient:
                     return response
                 if error:
                     errors.append((label, str(error)[:80]))
+                    if _is_connectivity_error(error):
+                        timeout_count += 1
 
+        if timeout_count >= len(candidates):
+            raise RuntimeError(
+                f"竞速全部连接失败 ({len(candidates)} 模型不可达)，API 可能不可用: {errors}"
+            )
         raise RuntimeError(
             f"竞速全部失败 ({len(candidates)} 模型): {errors}"
         )

@@ -146,7 +146,7 @@ class TestExtractLearning:
 
         qs = learning["quality_signals"]
         assert qs["validation_rejection_rate"] > 0
-        assert qs["human_corrections_count"] == 1
+        assert qs["human_corrections_count"] == 0  # v2: counts correction verdicts, not notes
         assert qs["high_confidence_verified_count"] == 1  # diff-001 has conf 0.95, status verified
 
     def test_extracts_high_confidence_patterns(self):
@@ -183,7 +183,7 @@ class TestExtractLearning:
         result = _make_result()
         learning = extract_learning(result, "note001")
 
-        assert learning["quality_signals"]["human_corrections_count"] == 1
+        assert learning["quality_signals"]["human_corrections_count"] == 0  # v2: counts correction verdicts, not notes
         assert len(learning["human_notes"]) == 1
         assert learning["human_notes"][0]["change_id"] == "diff-002"
 
@@ -476,7 +476,7 @@ class TestUpdateIndex:
         trends = index["global_trends"]
         assert trends["avg_total_changes"] == 3
         assert trends["avg_high_risk_count"] == 1
-        assert trends["total_human_corrections"] == 1
+        assert trends["total_human_corrections"] == 0  # v2: counts correction verdicts, not notes
 
     def test_aggregates_multiple_runs(self, tmp_path):
         result = _make_result()
@@ -490,7 +490,7 @@ class TestUpdateIndex:
 
         index = _load_index(tmp_path)
         assert index["total_runs"] == 4
-        assert index["global_trends"]["total_human_corrections"] == 4
+        assert index["global_trends"]["total_human_corrections"] == 0  # v2: counts correction verdicts, not notes
 
     def test_index_includes_human_feedback_fields(self, tmp_path):
         """V2: index run_entry and global_trends include human feedback."""

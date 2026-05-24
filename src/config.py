@@ -87,7 +87,7 @@ class AppConfig:
 
     # ── LLM behaviour ─────────────────────────────────────────────────
     llm_max_tokens: int = 3000
-    llm_timeout: int = 300
+    llm_timeout: int = 60
     llm_batch_size: int = 25
     classify_max_tokens: int = 2500
     enhance_max_tokens: int = 2000
@@ -166,7 +166,7 @@ class AppConfig:
 
             # LLM behaviour
             llm_max_tokens=int(_env("LLM_MAX_TOKENS", "3000")),
-            llm_timeout=int(_env("LLM_TIMEOUT", "300")),
+            llm_timeout=int(_env("LLM_TIMEOUT", "60")),
             llm_batch_size=int(_env("LLM_BATCH_SIZE", "25")),
             classify_max_tokens=int(_env("CLASSIFY_MAX_TOKENS", "2500")),
             enhance_max_tokens=int(_env("ENHANCE_MAX_TOKENS", "2000")),

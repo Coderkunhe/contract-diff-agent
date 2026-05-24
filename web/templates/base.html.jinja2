@@ -62,11 +62,123 @@ tailwind.config = {
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
   ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+  /* ═══════════════════════════════════════════════
+     Dark theme — 演示模式 (data-theme="dark")
+     ═══════════════════════════════════════════════ */
+  [data-theme="dark"] body {
+    background: #0c0e1a !important;
+  }
+  [data-theme="dark"] header {
+    background: rgba(12, 14, 26, 0.97) !important;
+    border-color: #1e1e36 !important;
+  }
+  [data-theme="dark"] footer {
+    background: rgba(12, 14, 26, 0.9) !important;
+    border-color: #1e293b !important;
+  }
+  /* Cards & surfaces */
+  [data-theme="dark"] .bg-white,
+  [data-theme="dark"] .bg-white\/95,
+  [data-theme="dark"] .bg-white\/98,
+  [data-theme="dark"] .bg-white\/80 {
+    background-color: #161830 !important;
+  }
+  [data-theme="dark"] .bg-slate-50,
+  [data-theme="dark"] .bg-slate-50\/80,
+  [data-theme="dark"] .bg-slate-50\/90 {
+    background-color: #1a1c36 !important;
+  }
+  [data-theme="dark"] .bg-slate-100 { background-color: #1f203a !important; }
+  /* Text */
+  [data-theme="dark"] .text-slate-900 { color: #f1f5f9 !important; }
+  [data-theme="dark"] .text-slate-800 { color: #e2e8f0 !important; }
+  [data-theme="dark"] .text-slate-700 { color: #cbd5e1 !important; }
+  [data-theme="dark"] .text-slate-600 { color: #cbd5e1 !important; }
+  [data-theme="dark"] .text-slate-500 { color: #94a3b8 !important; }
+  [data-theme="dark"] .text-slate-400 { color: #94a3b8 !important; }
+  [data-theme="dark"] .text-slate-300 { color: #64748b !important; }
+  /* Borders */
+  [data-theme="dark"] .border-slate-200,
+  [data-theme="dark"] .border-slate-200\/60 {
+    border-color: #334155 !important;
+  }
+  [data-theme="dark"] .border-slate-100 { border-color: #1e1e36 !important; }
+  [data-theme="dark"] .border-slate-300 { border-color: #475569 !important; }
+  [data-theme="dark"] .border-t-slate-100 { border-top-color: #1e1e36 !important; }
+  [data-theme="dark"] .border-t-slate-200 { border-top-color: #334155 !important; }
+  /* Dividers */
+  [data-theme="dark"] .border-t { border-top-color: #334155 !important; }
+  /* Risk stat cards — transparent overlay on dark */
+  [data-theme="dark"] .bg-red-100 { background-color: rgba(185, 28, 28, 0.2) !important; }
+  [data-theme="dark"] .bg-amber-100 { background-color: rgba(180, 83, 9, 0.2) !important; }
+  [data-theme="dark"] .bg-emerald-100 { background-color: rgba(4, 120, 87, 0.2) !important; }
+  [data-theme="dark"] .bg-red-50\/80,
+  [data-theme="dark"] .bg-red-50 { background-color: rgba(185, 28, 28, 0.15) !important; }
+  [data-theme="dark"] .bg-amber-50\/80,
+  [data-theme="dark"] .bg-amber-50 { background-color: rgba(180, 83, 9, 0.15) !important; }
+  [data-theme="dark"] .bg-emerald-50 { background-color: rgba(4, 120, 87, 0.15) !important; }
+  [data-theme="dark"] .bg-blue-50 { background-color: rgba(29, 78, 216, 0.15) !important; }
+  [data-theme="dark"] .bg-brand-50 { background-color: rgba(76, 110, 245, 0.15) !important; }
+  [data-theme="dark"] .bg-purple-50 { background-color: rgba(124, 58, 237, 0.15) !important; }
+  /* Risk text — brighter on dark */
+  [data-theme="dark"] .text-red-700 { color: #f87171 !important; }
+  [data-theme="dark"] .text-red-600 { color: #f87171 !important; }
+  [data-theme="dark"] .text-amber-700 { color: #fbbf24 !important; }
+  [data-theme="dark"] .text-amber-600 { color: #fbbf24 !important; }
+  [data-theme="dark"] .text-emerald-700 { color: #4ade80 !important; }
+  [data-theme="dark"] .text-emerald-600 { color: #4ade80 !important; }
+  [data-theme="dark"] .text-blue-700 { color: #60a5fa !important; }
+  [data-theme="dark"] .text-blue-600 { color: #60a5fa !important; }
+  [data-theme="dark"] .text-purple-700 { color: #a78bfa !important; }
+  [data-theme="dark"] .text-purple-500 { color: #a78bfa !important; }
+  /* Inputs / textareas */
+  [data-theme="dark"] textarea,
+  [data-theme="dark"] input[type="text"],
+  [data-theme="dark"] input:not([type]) {
+    background-color: #0c0e1a !important;
+    color: #e2e8f0 !important;
+    border-color: #2a2c44 !important;
+  }
+  /* Risk category tags */
+  [data-theme="dark"] .bg-slate-100.text-slate-500 {
+    background-color: #334155 !important;
+    color: #94a3b8 !important;
+  }
+  /* Hover states */
+  [data-theme="dark"] .hover\:bg-brand-100:hover { background-color: rgba(76, 110, 245, 0.15) !important; }
+  [data-theme="dark"] .hover\:bg-slate-50:hover { background-color: #334155 !important; }
+  [data-theme="dark"] .hover\:bg-slate-100:hover { background-color: #475569 !important; }
+  [data-theme="dark"] .hover\:bg-emerald-50:hover { background-color: rgba(4, 120, 87, 0.2) !important; }
+  [data-theme="dark"] .hover\:bg-red-50:hover { background-color: rgba(185, 28, 28, 0.2) !important; }
+  [data-theme="dark"] .hover\:bg-purple-50:hover { background-color: rgba(124, 58, 237, 0.2) !important; }
+  /* Filter buttons inactive */
+  [data-theme="dark"] .bg-slate-50.text-slate-500 {
+    background-color: #334155 !important;
+    color: #94a3b8 !important;
+  }
+  /* Shadows */
+  [data-theme="dark"] .shadow-sm { box-shadow: 0 1px 2px rgba(0,0,0,0.3) !important; }
+  [data-theme="dark"] .shadow-lg,
+  [data-theme="dark"] .shadow-xl { box-shadow: 0 10px 15px rgba(0,0,0,0.4) !important; }
+  /* Snippet bg */
+  [data-theme="dark"] .bg-slate-50.rounded-lg { background-color: #0c0e1a !important; }
+  /* Version badge */
+  [data-theme="dark"] .bg-slate-100.rounded-full { background-color: #334155 !important; }
+  /* Demo card — 一键快速体验 */
+  [data-theme="dark"] .from-accent-50 { --tw-gradient-from: rgba(250, 204, 21, 0.1) var(--tw-gradient-from-position) !important; }
+  [data-theme="dark"] .to-brand-50 { --tw-gradient-to: rgba(76, 110, 245, 0.1) var(--tw-gradient-to-position) !important; }
+  /* Footer / subtle surfaces */
+  [data-theme="dark"] .border-t-2.border-slate-200 { border-color: #1e1e36 !important; }
+  [data-theme="dark"] .bg-white\/80 { background-color: rgba(22, 24, 48, 0.8) !important; }
+  /* Submit button in dark */
+  [data-theme="dark"] .bg-slate-900 { background-color: #4f46e5 !important; }
+  [data-theme="dark"] .hover\:bg-slate-800:hover { background-color: #4338ca !important; }
 </style>
 </head>
-<body class="bg-slate-50 text-slate-800 font-body antialiased min-h-screen flex flex-col">
+<body class="bg-gradient-to-br from-slate-200 via-slate-100 to-slate-100 text-slate-800 font-body antialiased min-h-screen flex flex-col">
   <!-- Top bar -->
-  <header class="sticky top-0 z-50 bg-white/80 backdrop-blur-md border-b border-slate-200/60">
+  <header class="sticky top-0 z-50 bg-white/95 backdrop-blur-md border-b-2 border-slate-200 shadow-sm">
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
       <div class="flex items-center justify-between h-14">
         <a href="/" class="flex items-center gap-2.5 group">
@@ -74,6 +186,7 @@ tailwind.config = {
           <span class="font-semibold text-slate-800 text-base tracking-tight">合同慧眼</span>
         </a>
         <div class="flex items-center gap-3">
+          <button onclick="toggleTheme()" class="text-[11px] text-slate-400 hover:text-brand-600 font-medium transition-colors cursor-pointer" id="themeToggle" title="切换深色/浅色主题">🌙</button>
           <a href="/learnings" class="text-[11px] text-slate-400 hover:text-brand-600 font-medium transition-colors">进化记录</a>
           <span class="text-[11px] text-slate-400 font-medium bg-slate-100 px-2 py-0.5 rounded-full">v{{ version }}</span>
         </div>
@@ -87,10 +200,33 @@ tailwind.config = {
   </main>
 
   <!-- Footer -->
-  <footer class="border-t border-slate-200/60 bg-white/50">
+  <footer class="border-t-2 border-slate-200 bg-white/80">
     <div class="max-w-7xl mx-auto px-4 py-4 text-center">
       <p class="text-[11px] text-slate-400">供内部审核使用 · 不构成正式法律意见</p>
     </div>
   </footer>
+  <script>
+  function toggleTheme() {
+    const html = document.documentElement;
+    const btn = document.getElementById('themeToggle');
+    if (html.dataset.theme === 'dark') {
+      html.removeAttribute('data-theme');
+      localStorage.setItem('theme', 'light');
+      if (btn) btn.textContent = '🌙';
+    } else {
+      html.setAttribute('data-theme', 'dark');
+      localStorage.setItem('theme', 'dark');
+      if (btn) btn.textContent = '☀️';
+    }
+  }
+  (function() {
+    const saved = localStorage.getItem('theme');
+    const btn = document.getElementById('themeToggle');
+    if (saved === 'dark') {
+      document.documentElement.setAttribute('data-theme', 'dark');
+      if (btn) btn.textContent = '☀️';
+    }
+  })();
+  </script>
 </body>
 </html>

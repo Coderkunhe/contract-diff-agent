@@ -193,7 +193,7 @@ def extract_learning(result: dict, job_id: str) -> dict:
         "quality_signals": {
             "validation_rejection_rate": round(rejection_rate, 4),
             "validation_uncertain_rate": round(uncertain_rate, 4),
-            "human_corrections_count": human_count,
+            "human_corrections_count": h_corrected,
             "high_confidence_verified_count": high_conf_verified,
         },
         "high_confidence_patterns": hc_patterns,

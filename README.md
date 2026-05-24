@@ -157,7 +157,7 @@ LLM_MODEL=deepseek-chat
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
 | `LLM_MAX_TOKENS` | 3000 | LLM 单次调用最大输出 token |
-| `LLM_TIMEOUT` | 300 | HTTP 请求超时（秒） |
+| `LLM_TIMEOUT` | 60 | HTTP 请求超时（秒） |
 | `LLM_BATCH_SIZE` | 25 | 风险分类批量大小 |
 | `CLASSIFY_MAX_TOKENS` | 2500 | 分类阶段 max_tokens |
 | `ENHANCE_MAX_TOKENS` | 2000 | 增强描述阶段 max_tokens |
