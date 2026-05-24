@@ -77,7 +77,7 @@ def _run_v04(args, v1, v2, api_key: str, base_url: str, model: str,
 
             # ⑤ thorough 模式：独立风险分类 (二次校验)
             if thorough:
-                _progress("classifying", 75, "独立风险分类", "二次校验风险标注...")
+                _progress("classifying", 75, "交叉校验风险分类", "独立模型二次校验，反幻觉...")
                 from .pipeline.classifier import classify_changes
                 raw_changes = classify_changes(
                     raw_changes, api_key=api_key, model=model, base_url=base_url,

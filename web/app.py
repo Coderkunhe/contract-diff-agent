@@ -67,7 +67,7 @@ _JOB_STATUS_STEPS = {
     "traditional_diff": (25, "传统算法对比"),
     "enhancing": (30, "LLM 增强描述"),
     "validating": (55, "L2 原文校验"),
-    "classifying": (75, "风险分类"),
+    "classifying": (75, "交叉校验风险分类"),
     "done": (100, "完成"),
     "error": (0, "出错"),
 }
@@ -120,8 +120,8 @@ class JobProgressIO(io.StringIO):
             stage_info = ("enhancing", 30, "LLM 增强描述")
         elif "校验" in line or "原文校验" in line:
             stage_info = ("validating", 55, "L2 原文校验")
-        elif "风险分类" in line:
-            stage_info = ("classifying", 75, "风险分类")
+        elif "风险分类" in line or "交叉校验" in line:
+            stage_info = ("classifying", 75, "交叉校验风险分类")
         elif "离线模式" in line:
             stage_info = ("validating", 25, "离线模式跳过 LLM")
 
