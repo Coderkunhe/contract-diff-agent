@@ -13,6 +13,7 @@ build/
 
 # Test
 .pytest_cache/
+.coverage
 
 # Environment
 .env

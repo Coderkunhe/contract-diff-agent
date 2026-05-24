@@ -171,6 +171,21 @@ class TestExtractLearning:
         assert learning["quality_signals"]["validation_rejection_rate"] == 0
         assert learning["quality_signals"]["high_confidence_verified_count"] == 0
 
+    def test_counts_uncertain_verdicts(self):
+        """l3_verdict='uncertain' increments uncertain count."""
+        result = _make_result()
+        result["changes"][0]["validation"]["l3_verdict"] = "uncertain"
+        learning = extract_learning(result, "uncert001")
+        assert learning["quality_signals"]["validation_uncertain_rate"] > 0
+
+    def test_resolve_relative_data_dir(self, monkeypatch, tmp_path):
+        """_resolve_dir with a relative path resolves against project root."""
+        from src.pipeline.learning import _resolve_dir
+        # Use a tmp_path that's not absolute
+        rel = Path("data/test_learnings")
+        resolved = _resolve_dir(rel)
+        assert resolved.is_absolute()
+
 
 # ── Test save / load ───────────────────────────────────────────────
 
