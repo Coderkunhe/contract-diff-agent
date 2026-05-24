@@ -22,6 +22,8 @@ build/
 data/*.json
 data/jobs/
 data/uploads/
+data/learnings/*.json
+data/learnings/index.json
 
 # OS
 .DS_Store

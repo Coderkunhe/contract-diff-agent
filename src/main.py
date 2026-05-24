@@ -280,6 +280,18 @@ def main():
         print(f"\n🔍 条款树比对 v0.4 ({mode_str})...")
         result = _run_v04(args, v1, v2, api_key, base_url, args.model)
 
+    # Self-evolution: extract and save learning (non-fatal)
+    try:
+        from src.pipeline.learning import extract_learning, save_learning
+        import hashlib
+        from datetime import datetime, timezone
+        raw_id = f"{args.v1}{args.v2}{datetime.now(timezone.utc).isoformat()}"
+        jid = hashlib.md5(raw_id.encode()).hexdigest()[:8]
+        learning = extract_learning(result, jid)
+        save_learning(learning)
+    except Exception as e:
+        print(f"  ⚠️ 进化记录保存失败: {e}")
+
     # Display results
     print(f"\n--- 比对结果 ---")
     s = result["diff_summary"]

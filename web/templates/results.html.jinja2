@@ -91,6 +91,51 @@
     <span class="text-xs text-slate-400">显示 {{ changes | length }} 条</span>
   </div>
 
+  <!-- Floating nav: quick-jump dot matrix (desktop only) -->
+  <div class="hidden lg:block fixed right-[max(1rem,calc((100vw-80rem)/2-3.5rem))] top-[50%] -translate-y-1/2 z-50"
+       x-show="changeItems.length > 0"
+       x-transition>
+    <div class="bg-white/95 backdrop-blur-md rounded-2xl border border-slate-200 shadow-xl p-3 w-[68px] max-h-[60vh] overflow-hidden flex flex-col">
+      <div class="text-[10px] font-bold text-slate-500 text-center mb-2 flex-shrink-0"
+           x-text="confirmedCount + '/' + changeItems.length"></div>
+      <div class="flex-1 overflow-y-auto scrollbar-thin">
+        <div class="flex flex-col gap-[2px]">
+          <template x-for="(item, idx) in changeItems" :key="item.id">
+            <button @click="scrollTo(item.id); hoverIdx = idx"
+                    @mouseenter="hoverIdx = idx"
+                    @mouseleave="hoverIdx = null"
+                    class="w-full h-[6px] rounded-full transition-all duration-150 hover:scale-125 hover:ring-1 hover:ring-slate-300 cursor-pointer flex-shrink-0"
+                    :class="{
+                      'bg-emerald-400': isConfirmed(item.id),
+                      'bg-red-400': !isConfirmed(item.id) && item.risk === 'high',
+                      'bg-amber-400': !isConfirmed(item.id) && item.risk === 'medium',
+                      'bg-slate-300': !isConfirmed(item.id) && item.risk === 'low',
+                      'ring-2 ring-slate-500 scale-125': hoverIdx === idx
+                    }"
+                    :title="item.brief || item.id"></button>
+          </template>
+        </div>
+      </div>
+      <div class="flex-shrink-0 mt-2 flex justify-center gap-[3px]">
+        <span class="w-2 h-2 rounded-full bg-emerald-400" title="已确认"></span>
+        <span class="w-2 h-2 rounded-full bg-red-400" title="高风险未确认"></span>
+        <span class="w-2 h-2 rounded-full bg-amber-400" title="中风险未确认"></span>
+        <span class="w-2 h-2 rounded-full bg-slate-300" title="低风险未确认"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tooltip on hover -->
+  <div class="hidden lg:block fixed z-50 pointer-events-none"
+       x-show="hoverIdx !== null"
+       style="right: max(9rem, calc((100vw-80rem)/2+1rem)); top: 50%;"
+       x-transition:enter="transition ease-out duration-150"
+       x-transition:enter-start="opacity-0 translate-x-2"
+       x-transition:enter-end="opacity-100 translate-x-0">
+    <div class="bg-slate-900 text-white text-[11px] px-2.5 py-1.5 rounded-lg shadow-lg max-w-[200px] truncate"
+         x-text="hoverIdx !== null ? (changeItems[hoverIdx]?.brief || changeItems[hoverIdx]?.id) : ''"></div>
+  </div>
+
   <!-- Changes list -->
   <div class="space-y-3">
     {% for change in changes %}
@@ -101,7 +146,10 @@
          x-transition:enter-end="opacity-100 translate-y-0"
          :class="'{{ change.risk_level }}' === 'high' ? 'border-l-[3px] border-l-red-400' : ''"
          x-data="{ expanded: false }"
-         data-change-id="{{ change.id }}">
+         data-change-id="{{ change.id }}"
+         data-risk="{{ change.risk_level }}"
+         data-type="{{ change.change_type }}"
+         data-brief="{{ change.brief | truncate(80) | e }}">
       <div class="flex items-start gap-4">
         <!-- Risk badge -->
         <div class="flex-shrink-0 pt-0.5">
@@ -254,18 +302,48 @@ function resultsPage() {
     riskFilter: 'all',
     typeFilter: 'all',
     allChangeIds: [],
+    _changeMeta: {},
     notes: {},
     saveMsg: '',
+    hoverIdx: null,
     get totalChanges() { return this.allChangeIds.length; },
     get confirmed() { return Alpine.store('confirmSet'); },
     get confirmedCount() { return this.confirmed.length; },
     get confirmPct() { return this.totalChanges ? Math.round(this.confirmedCount / this.totalChanges * 100) : 0; },
     get allSelected() { return this.confirmedCount >= this.totalChanges && this.totalChanges > 0; },
 
+    // Floating nav: reactive change list respecting current filter
+    get changeItems() {
+      return this.allChangeIds
+        .filter(id => {
+          const m = this._changeMeta[id];
+          if (!m) return false;
+          if (this.riskFilter !== 'all' && m.risk !== this.riskFilter) return false;
+          if (this.typeFilter !== 'all' && m.type !== this.typeFilter) return false;
+          return true;
+        })
+        .map(id => ({ id, ...this._changeMeta[id] }));
+    },
+
+    scrollTo(id) {
+      const el = document.querySelector(`[data-change-id="${id}"]`);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        el.classList.add('ring-2', 'ring-brand-300');
+        setTimeout(() => el.classList.remove('ring-2', 'ring-brand-300'), 1500);
+      }
+    },
+
     initConfirms(total) {
-      // Build list of all change IDs
+      // Build list of all change IDs with metadata for floating nav
       document.querySelectorAll('[data-change-id]').forEach(el => {
-        this.allChangeIds.push(el.dataset.changeId);
+        const id = el.dataset.changeId;
+        this.allChangeIds.push(id);
+        this._changeMeta[id] = {
+          risk: el.dataset.risk || 'low',
+          type: el.dataset.type || 'modified',
+          brief: el.dataset.brief || '',
+        };
       });
       // Load from localStorage
       const jobId = window.location.pathname.split('/').pop();

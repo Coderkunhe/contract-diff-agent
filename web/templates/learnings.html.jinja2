@@ -1,0 +1,166 @@
+{% extends "base.html.jinja2" %}
+{% block title %}进化记录 — 合同慧眼{% endblock %}
+{% block content %}
+<div class="max-w-6xl mx-auto px-4 py-12" x-data="learningsPage({ runs: {{ runs_json | safe }}, trends: {{ trends_json | safe }}, totalRuns: {{ total_runs }} })">
+
+  <!-- Page header -->
+  <div class="text-center mb-10 animate-fade-in">
+    <h1 class="text-3xl sm:text-4xl font-bold text-slate-900 tracking-tight mb-3">
+      自进化记录
+    </h1>
+    <p class="text-slate-500 text-base max-w-lg mx-auto leading-relaxed">
+      每次合同比对后自动提取经验，持续优化后续分析准确率
+    </p>
+  </div>
+
+  <!-- Summary bar -->
+  <div class="bg-white rounded-2xl border border-slate-200 p-6 mb-8 animate-fade-in stagger-1"
+       x-show="totalRuns > 0">
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
+      <div>
+        <div class="text-2xl font-bold text-brand-600" x-text="totalRuns">0</div>
+        <div class="text-xs text-slate-400 mt-0.5">累计运行</div>
+      </div>
+      <div>
+        <div class="text-2xl font-bold text-slate-700" x-text="trends.avg_total_changes || '-'">-</div>
+        <div class="text-xs text-slate-400 mt-0.5">平均差异数</div>
+      </div>
+      <div>
+        <div class="text-2xl font-bold text-red-500" x-text="trends.avg_high_risk_count || '-'">-</div>
+        <div class="text-xs text-slate-400 mt-0.5">平均高风险</div>
+      </div>
+      <div>
+        <div class="text-2xl font-bold text-slate-700" x-text="trends.total_human_corrections || '0'">0</div>
+        <div class="text-xs text-slate-400 mt-0.5">累计人工纠正</div>
+      </div>
+    </div>
+    <!-- Trending categories -->
+    <div class="mt-5 pt-4 border-t border-slate-100" x-show="trends.top_risk_categories && trends.top_risk_categories.length > 0">
+      <div class="flex items-center gap-2 justify-center flex-wrap">
+        <span class="text-xs text-slate-400">高频风险类别:</span>
+        <template x-for="cat in trends.top_risk_categories" :key="cat.name">
+          <span class="text-xs font-medium bg-brand-50 text-brand-700 px-2 py-0.5 rounded-full" x-text="cat.name + ' (' + cat.total_count + ')'"></span>
+        </template>
+      </div>
+    </div>
+  </div>
+
+  <!-- Empty state -->
+  <div class="text-center py-16 animate-fade-in" x-show="totalRuns === 0">
+    <div class="w-20 h-20 rounded-full bg-slate-100 flex items-center justify-center mx-auto mb-4">
+      <svg class="w-10 h-10 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/>
+      </svg>
+    </div>
+    <p class="text-slate-400 text-lg font-medium">暂无进化记录</p>
+    <p class="text-slate-400 text-sm mt-1">完成一次合同比对后，经验将自动记录于此</p>
+  </div>
+
+  <!-- Controls -->
+  <div class="flex items-center gap-3 mb-6 animate-fade-in stagger-2" x-show="totalRuns > 0">
+    <span class="text-xs text-slate-400 font-medium">排序:</span>
+    <button @click="sortBy = 'date'" class="text-xs px-3 py-1.5 rounded-lg font-medium transition-all"
+            :class="sortBy === 'date' ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'">日期</button>
+    <button @click="sortBy = 'changes'" class="text-xs px-3 py-1.5 rounded-lg font-medium transition-all"
+            :class="sortBy === 'changes' ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'">差异数</button>
+    <button @click="sortBy = 'high_risk'" class="text-xs px-3 py-1.5 rounded-lg font-medium transition-all"
+            :class="sortBy === 'high_risk' ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'">高风险</button>
+    <span class="w-px h-4 bg-slate-200"></span>
+    <span class="text-xs text-slate-400 font-medium">模式:</span>
+    <button @click="filterMode = 'all'" class="text-xs px-3 py-1.5 rounded-lg font-medium transition-all"
+            :class="filterMode === 'all' ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'">全部</button>
+    <button @click="filterMode = 'llm'" class="text-xs px-3 py-1.5 rounded-lg font-medium transition-all"
+            :class="filterMode === 'llm' ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'">LLM增强</button>
+    <button @click="filterMode = 'offline'" class="text-xs px-3 py-1.5 rounded-lg font-medium transition-all"
+            :class="filterMode === 'offline' ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'">离线模式</button>
+  </div>
+
+  <!-- Card grid -->
+  <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+    <template x-for="(run, idx) in sortedRuns" :key="run.job_id">
+      <div class="bg-white rounded-2xl border border-slate-200 p-5 hover:shadow-md hover:border-brand-200 transition-all animate-fade-in"
+           :style="'animation-delay:' + (idx * 0.05) + 's'">
+        <!-- Header -->
+        <div class="flex items-center justify-between mb-3">
+          <span class="text-xs text-slate-400" x-text="formatDate(run.timestamp)"></span>
+          <div class="flex items-center gap-1.5">
+            <span class="text-[10px] px-1.5 py-0.5 rounded font-medium"
+                  :class="run.model && run.model !== 'offline' ? 'bg-brand-50 text-brand-700' : 'bg-slate-100 text-slate-500'"
+                  x-text="run.model && run.model !== 'offline' ? 'LLM' : '离线'"></span>
+            <span class="text-[10px] font-mono text-slate-300" x-text="run.job_id"></span>
+          </div>
+        </div>
+
+        <!-- Change count big number -->
+        <div class="text-3xl font-bold text-slate-800 mb-3" x-text="run.total_changes">0</div>
+
+        <!-- Risk bars -->
+        <div class="flex gap-1 mb-4">
+          <div class="flex-1 h-1.5 rounded-full bg-red-200 relative overflow-hidden" x-show="run.high_risk > 0">
+            <div class="absolute inset-0 bg-red-400" :style="'width:' + (run.high_risk / run.total_changes * 100) + '%'"></div>
+          </div>
+          <div class="flex-1 h-1.5 rounded-full bg-amber-200 relative overflow-hidden" x-show="run.medium_risk > 0">
+            <div class="absolute inset-0 bg-amber-400" :style="'width:' + (run.medium_risk / run.total_changes * 100) + '%'"></div>
+          </div>
+          <div class="flex-1 h-1.5 rounded-full bg-emerald-200 relative overflow-hidden" x-show="run.low_risk > 0">
+            <div class="absolute inset-0 bg-emerald-400" :style="'width:' + (run.low_risk / run.total_changes * 100) + '%'"></div>
+          </div>
+        </div>
+
+        <!-- Stats row -->
+        <div class="flex items-center gap-4 text-xs mb-4">
+          <span class="text-red-500 font-medium" x-text="'H:' + run.high_risk"></span>
+          <span class="text-amber-500 font-medium" x-text="'M:' + run.medium_risk"></span>
+          <span class="text-emerald-500 font-medium" x-text="'L:' + run.low_risk"></span>
+          <span class="text-slate-300">|</span>
+          <span class="text-slate-400" x-show="run.model && run.model !== 'offline'" x-text="'拒绝率 ' + ratePct(run.validation_rejection_rate)"></span>
+          <span class="text-slate-400" x-show="!run.model || run.model === 'offline'">无需校验</span>
+        </div>
+
+        <!-- Top category tag -->
+        <div class="flex items-center gap-1.5 flex-wrap" x-show="run.top_category">
+          <span class="text-[10px] px-2 py-0.5 rounded-full bg-accent-50 text-accent-700 font-medium" x-text="run.top_category.name + ' (' + run.top_category.count + ')'"></span>
+          <span class="text-[10px] text-slate-400" x-show="run.human_corrections_count > 0" x-text="'✏️ ' + run.human_corrections_count"></span>
+        </div>
+      </div>
+    </template>
+  </div>
+</div>
+
+<script>
+function learningsPage(initial) {
+  return {
+    runs: initial.runs || [],
+    trends: initial.trends || {},
+    totalRuns: initial.totalRuns || 0,
+    sortBy: 'date',
+    filterMode: 'all',
+
+    get sortedRuns() {
+      let runs = [...this.runs];
+      if (this.filterMode === 'llm') {
+        runs = runs.filter(r => r.model && r.model !== 'offline');
+      } else if (this.filterMode === 'offline') {
+        runs = runs.filter(r => !r.model || r.model === 'offline');
+      }
+      if (this.sortBy === 'changes') {
+        runs.sort((a, b) => b.total_changes - a.total_changes);
+      } else if (this.sortBy === 'high_risk') {
+        runs.sort((a, b) => b.high_risk - a.high_risk);
+      }
+      return runs;
+    },
+
+    formatDate(ts) {
+      if (!ts) return '-';
+      return ts.slice(0, 16).replace('T', ' ');
+    },
+
+    ratePct(rate) {
+      if (rate == null || rate === undefined) return '-';
+      return (rate * 100).toFixed(0) + '%';
+    },
+  };
+}
+</script>
+{% endblock %}

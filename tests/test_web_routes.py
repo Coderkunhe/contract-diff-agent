@@ -341,3 +341,46 @@ class TestSSE:
     def test_sse_404(self):
         resp = client.get("/job/nonexist/stream")
         assert resp.status_code == 404
+
+
+class TestLearningsPage:
+    def test_page_renders_empty(self, tmp_path, monkeypatch):
+        """Learnings page renders even with no data."""
+        monkeypatch.setattr("src.pipeline.learning._resolve_dir", lambda _: tmp_path)
+        (tmp_path / "index.json").write_text(json.dumps({
+            "version": "1.0", "total_runs": 0, "runs": [], "global_trends": {},
+        }))
+        resp = client.get("/learnings")
+        assert resp.status_code == 200
+        assert "text/html" in resp.headers.get("content-type", "")
+        assert "暂无进化记录" in resp.text
+
+    def test_page_renders_with_data(self, tmp_path, monkeypatch):
+        """Learnings page renders with run data."""
+        monkeypatch.setattr("src.pipeline.learning._resolve_dir", lambda _: tmp_path)
+        (tmp_path / "index.json").write_text(json.dumps({
+            "version": "1.0",
+            "total_runs": 1,
+            "runs": [{
+                "job_id": "abc12345", "timestamp": "2026-05-24T12:00:00Z",
+                "pipeline": "v04-llm_enhanced", "model": "deepseek-chat",
+                "total_changes": 195, "high_risk": 12, "medium_risk": 45, "low_risk": 138,
+                "top_category": {"id": "R01", "name": "交付时效", "count": 25},
+                "top_categories": [{"id": "R01", "name": "交付时效", "count": 25}],
+                "validation_rejection_rate": 0.05,
+                "human_corrections_count": 3,
+                "summary": "test summary",
+            }],
+            "global_trends": {"avg_total_changes": 195, "avg_high_risk_count": 12},
+        }))
+        resp = client.get("/learnings")
+        assert resp.status_code == 200
+        assert "abc12345" in resp.text
+        assert "deepseek-chat" in resp.text
+
+    def test_page_handles_missing_index(self, tmp_path, monkeypatch):
+        """Learnings page works when index.json doesn't exist."""
+        monkeypatch.setattr("src.pipeline.learning._resolve_dir", lambda _: tmp_path)
+        resp = client.get("/learnings")
+        assert resp.status_code == 200
+        assert "暂无进化记录" in resp.text

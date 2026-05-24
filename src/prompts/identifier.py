@@ -7,6 +7,12 @@ Two modes:
 
 from src.constants.risks import RISK_CATEGORIES
 
+try:
+    from src.pipeline.learning import load_past_learnings, format_learnings_context
+except ImportError:
+    load_past_learnings = None  # type: ignore[assignment]
+    format_learnings_context = None  # type: ignore[assignment]
+
 # ── Enhancement mode (new) ────────────────────────────────────────
 # Input: already-identified changes with snippets. LLM enriches.
 
@@ -59,7 +65,18 @@ def build_enhance_system_prompt() -> str:
         f"- {c['id']}: {c['name']}（关注：{c['focus']}）"
         for c in RISK_CATEGORIES
     )
-    return ENHANCE_SYSTEM.format(risk_categories=cat_lines)
+    base = ENHANCE_SYSTEM.format(risk_categories=cat_lines)
+
+    if load_past_learnings and format_learnings_context:
+        try:
+            past = load_past_learnings(limit=5)
+            ctx = format_learnings_context(past)
+            if ctx:
+                base = ctx + "\n\n" + base
+        except Exception:
+            pass
+
+    return base
 
 
 def build_enhance_user_prompt(changes: list[dict], clause_title: str,

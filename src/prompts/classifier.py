@@ -5,6 +5,12 @@ Edit CLASSIFIER_SYSTEM to tune the classifier's behavior.
 
 from src.constants.risks import RISK_CATEGORIES
 
+try:
+    from src.pipeline.learning import load_past_learnings, format_learnings_context
+except ImportError:
+    load_past_learnings = None  # type: ignore[assignment]
+    format_learnings_context = None  # type: ignore[assignment]
+
 CLASSIFIER_SYSTEM = """你是风控合规分析师，面向非法律背景的业务人员。
 
 ## 任务
@@ -47,4 +53,15 @@ def build_classifier_prompt() -> str:
         f"- {c['id']}: {c['name']}（关注：{c['focus']}）"
         for c in RISK_CATEGORIES
     )
-    return CLASSIFIER_SYSTEM.format(risk_categories=cat_lines)
+    base = CLASSIFIER_SYSTEM.format(risk_categories=cat_lines)
+
+    if load_past_learnings and format_learnings_context:
+        try:
+            past = load_past_learnings(limit=5)
+            ctx = format_learnings_context(past)
+            if ctx:
+                base = ctx + "\n\n" + base
+        except Exception:
+            pass
+
+    return base

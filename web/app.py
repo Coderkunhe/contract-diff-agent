@@ -278,6 +278,14 @@ def _run_pipeline(job_id: str, v1_path: str, v2_path: str, keep_english: bool):
         with open(result_path, "w", encoding="utf-8") as f:
             json.dump(result, f, ensure_ascii=False, indent=2)
 
+        # Self-evolution: extract and save learning (non-fatal)
+        try:
+            from src.pipeline.learning import extract_learning, save_learning
+            learning = extract_learning(result, job_id)
+            save_learning(learning)
+        except Exception as e:
+            print(f"[LEARNING] Failed to save learning for {job_id}: {e}")
+
         now = datetime.now(timezone.utc)
         _update_job_inner(job_id, status="done", progress=100,
                           result_path=str(result_path),
@@ -797,6 +805,23 @@ async def job_stream(job_id: str):
         event_generator(),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.get("/learnings", response_class=HTMLResponse)
+def learnings_page():
+    """Self-evolution history page."""
+    from src.pipeline.learning import _load_index, _resolve_dir
+    import json as _json
+    data_dir = _resolve_dir(None)
+    index = _load_index(data_dir)
+
+    return _render(
+        "learnings.html.jinja2",
+        runs_json=_json.dumps(index.get("runs", []), ensure_ascii=False),
+        trends_json=_json.dumps(index.get("global_trends", {}), ensure_ascii=False),
+        total_runs=index.get("total_runs", 0),
+        updated_at=index.get("updated_at", ""),
     )
 
 
