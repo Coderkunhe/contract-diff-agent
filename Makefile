@@ -25,6 +25,12 @@ run-validate:
 web:
 	$(PYTHON) -m web.app
 
+demo-data:
+	$(PYTHON) scripts/prepare_demo.py --reset
+
+demo: demo-data
+	$(PYTHON) -m web.app
+
 test:
 	$(PYTHON) -m pytest tests/ -v
 
