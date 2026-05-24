@@ -400,3 +400,96 @@ class TestDemo:
         job_id = resp.headers["location"].split("/")[-1]
         with _JOBS_LOCK:
             assert job_id in _JOBS
+
+
+# ── V2: Human verdict endpoint ──────────────────────────────────────
+
+class TestVerdicts:
+    def test_update_verdict_confirmed(self, test_result_data):
+        """PUT /api/results/{job_id}/verdicts with confirmed action."""
+        path = _setup_job_and_result("vtest-conf", test_result_data)
+        resp = client.put("/api/results/vtest-conf/verdicts", json={
+            "verdicts": {"diff-001": {"action": "confirmed"}}
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["updated"] == 1
+        assert data["corrections"] == 0
+
+        # Verify persistence
+        with open(path, encoding="utf-8") as f:
+            saved = json.load(f)
+        change = saved["changes"][0]
+        assert change["human_verdict"]["action"] == "confirmed"
+        assert change["human_verdict"]["timestamp"] is not None
+        # Original snapshot should exist
+        assert change["human_verdict"]["original"]["risk_level"] == "high"
+
+    def test_update_verdict_corrected_overwrites_risk(self, test_result_data):
+        """PUT .../verdicts with corrected action overwrites risk fields."""
+        _setup_job_and_result("vtest-corr", test_result_data)
+        resp = client.put("/api/results/vtest-corr/verdicts", json={
+            "verdicts": {
+                "diff-001": {
+                    "action": "corrected",
+                    "corrected_risk_level": "low",
+                    "corrected_risk_categories": ["R02"],
+                    "corrected_risk_note": "人工纠偏测试",
+                }
+            }
+        })
+        assert resp.status_code == 200
+        assert resp.json()["corrections"] == 1
+
+        # Verify the change was overwritten
+        with open(_PROJECT_ROOT / "data" / "jobs" / "vtest-corr.json", encoding="utf-8") as f:
+            saved = json.load(f)
+        change = saved["changes"][0]
+        assert change["risk_level"] == "low"
+        assert change["risk_categories"] == ["R02"]
+        assert change["risk_note"] == "人工纠偏测试"
+        # Original snapshot preserved
+        assert change["human_verdict"]["original"]["risk_level"] == "high"
+        assert change["human_verdict"]["original"]["risk_categories"] == ["R01"]
+
+    def test_update_verdict_idempotent(self, test_result_data):
+        """Re-sending same verdict preserves original timestamp."""
+        _setup_job_and_result("vtest-idem", test_result_data)
+        # First write
+        client.put("/api/results/vtest-idem/verdicts", json={
+            "verdicts": {"diff-001": {"action": "confirmed"}}
+        })
+        with open(_PROJECT_ROOT / "data" / "jobs" / "vtest-idem.json", encoding="utf-8") as f:
+            ts1 = json.load(f)["changes"][0]["human_verdict"]["timestamp"]
+
+        # Second write with same action
+        client.put("/api/results/vtest-idem/verdicts", json={
+            "verdicts": {"diff-001": {"action": "confirmed"}}
+        })
+        with open(_PROJECT_ROOT / "data" / "jobs" / "vtest-idem.json", encoding="utf-8") as f:
+            ts2 = json.load(f)["changes"][0]["human_verdict"]["timestamp"]
+
+        assert ts1 == ts2  # Original timestamp preserved
+
+    def test_update_verdict_backward_compat(self, test_result_data):
+        """Old changes without human_verdict work fine with the endpoint."""
+        _setup_job_and_result("vtest-bw", test_result_data)
+        resp = client.put("/api/results/vtest-bw/verdicts", json={
+            "verdicts": {"diff-001": {"action": "rejected"}}
+        })
+        assert resp.status_code == 200
+        assert resp.json()["updated"] == 1
+
+        # Change should now have human_verdict with original snapshot
+        with open(_PROJECT_ROOT / "data" / "jobs" / "vtest-bw.json", encoding="utf-8") as f:
+            saved = json.load(f)
+        hv = saved["changes"][0]["human_verdict"]
+        assert hv["action"] == "rejected"
+        assert "original" in hv
+
+    def test_update_verdict_404(self):
+        """PUT .../verdicts on non-existent job returns 404."""
+        resp = client.put("/api/results/nonexistent/verdicts", json={
+            "verdicts": {"diff-001": {"action": "confirmed"}}
+        })
+        assert resp.status_code == 404

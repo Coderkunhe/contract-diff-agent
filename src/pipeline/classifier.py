@@ -5,6 +5,7 @@ Batches changes and calls LLM to assign risk categories, levels, and plain-langu
 
 import json
 import os
+import re
 from typing import Any
 
 from json_repair import repair_json
@@ -14,6 +15,21 @@ from src.constants.risks import RISK_CATEGORIES
 from src.llm.client import AutoFallbackClient
 from src.prompts.classifier import build_classifier_prompt
 from .extraction import estimate_tokens
+
+_MD_FENCE_RE = re.compile(r"```(?:json)?\s*\n?(.*?)\n?```", re.DOTALL)
+
+
+def _clean_llm_json(content: str) -> str:
+    """Strip markdown code fences and common LLM artifacts from JSON response."""
+    content = content.strip()
+    m = _MD_FENCE_RE.match(content)
+    if m:
+        content = m.group(1).strip()
+    if content.startswith("```"):
+        content = content[3:].strip()
+    if content.endswith("```"):
+        content = content[:-3].strip()
+    return content
 
 
 def classify_changes(
@@ -67,6 +83,7 @@ def classify_changes(
             )
 
             content = response.choices[0].message.content
+            content = _clean_llm_json(content)
             result = json.loads(repair_json(content))
 
             lookup = {c["id"]: c for c in result.get("classified", [])}

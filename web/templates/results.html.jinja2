@@ -4,7 +4,7 @@
 {% set summary = data.diff_summary %}
 {% set changes = data.changes %}
 
-<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8" x-data="resultsPage()" x-init="initConfirms({{ changes | length }})">
+<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8" x-data="resultsPage()" x-init="initVerdicts({{ verdicts_json | safe }})">
   <!-- Header -->
   <div class="flex flex-col sm:flex-row sm:items-end sm:justify-between mb-8 gap-4 animate-fade-in">
     <div>
@@ -148,7 +148,8 @@
          data-change-id="{{ change.id }}"
          data-risk="{{ change.risk_level }}"
          data-type="{{ change.change_type }}"
-         data-brief="{{ change.brief | truncate(80) | e }}">
+         data-brief="{{ change.brief | truncate(80) | e }}"
+         data-categories="{{ change.risk_categories | tojson | forceescape }}">
       <div class="flex items-start gap-4">
         <!-- Risk badge -->
         <div class="flex-shrink-0 pt-0.5">
@@ -241,7 +242,7 @@
             </div>
           </div>
 
-          <!-- Bottom bar: expand + confirm -->
+          <!-- Bottom bar: expand + verdict -->
           <div class="flex items-center justify-between pt-2 border-t border-slate-100">
             {% set show_expand = (change.v1_snippet or change.v2_snippet) and not (change.v1_snippet and change.v2_snippet and change.v1_snippet == change.v2_snippet) %}
             {% if show_expand %}
@@ -251,11 +252,61 @@
             {% else %}
             <span></span>
             {% endif %}
-            <button @click="toggleOne('{{ change.id }}')"
-                    class="px-3 py-1.5 rounded-lg text-xs font-medium border-2 transition-all duration-200 min-w-[72px]"
-                    :class="isConfirmed('{{ change.id }}') ? 'bg-emerald-500 border-emerald-500 text-white shadow-sm' : 'border-amber-300 text-amber-500 hover:border-emerald-400 hover:text-emerald-600'">
-              <span x-text="isConfirmed('{{ change.id }}') ? '✓ 已确认' : '待确认'"></span>
-            </button>
+            <div class="flex items-center gap-1.5">
+              <!-- Verdict badge (shown after verdict is set) -->
+              <span x-show="getVerdict('{{ change.id }}')"
+                    class="text-[10px] px-2 py-0.5 rounded-full font-medium"
+                    :class="verdictBadgeClass((getVerdict('{{ change.id }}') || {}).action)"
+                    x-text="verdictLabel((getVerdict('{{ change.id }}') || {}).action)"></span>
+              <!-- Three action buttons -->
+              <div class="flex items-center gap-1" x-show="!getVerdict('{{ change.id }}')">
+                <button @click="setVerdict('{{ change.id }}', 'confirmed')"
+                        class="px-2.5 py-1 rounded-lg text-[11px] font-medium border border-emerald-300 text-emerald-600 hover:bg-emerald-50 transition-colors">确认</button>
+                <button @click="setVerdict('{{ change.id }}', 'rejected')"
+                        class="px-2.5 py-1 rounded-lg text-[11px] font-medium border border-red-300 text-red-500 hover:bg-red-50 transition-colors">驳回</button>
+                <button @click="openCorrection('{{ change.id }}')"
+                        class="px-2.5 py-1 rounded-lg text-[11px] font-medium border border-purple-300 text-purple-500 hover:bg-purple-50 transition-colors">纠偏</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Inline correction form (shown on "纠偏" click) -->
+          <div x-show="correctionId === '{{ change.id }}'" x-transition
+               class="mt-3 pt-3 border-t border-purple-100">
+            <div class="text-xs font-semibold text-purple-700 mb-2">✏️ 纠偏 — 覆盖LLM的风险评估</div>
+            <!-- Risk level -->
+            <div class="mb-2">
+              <span class="text-[10px] text-slate-400 mr-2">风险等级:</span>
+              <label class="inline-flex items-center gap-1 mr-3 text-xs"><input type="radio" x-model="corrLevel" value="high" class="accent-red-500"> <span class="text-red-600">高</span></label>
+              <label class="inline-flex items-center gap-1 mr-3 text-xs"><input type="radio" x-model="corrLevel" value="medium" class="accent-amber-500"> <span class="text-amber-600">中</span></label>
+              <label class="inline-flex items-center gap-1 text-xs"><input type="radio" x-model="corrLevel" value="low" class="accent-emerald-500"> <span class="text-emerald-600">低</span></label>
+            </div>
+            <!-- Risk categories -->
+            <div class="mb-2">
+              <span class="text-[10px] text-slate-400 block mb-1">风险类别(可多选):</span>
+              <div class="flex flex-wrap gap-1">
+                {% for cat in data.risk_taxonomy_snapshot.categories %}
+                <label class="text-[10px] inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded border border-slate-200 cursor-pointer hover:border-purple-300"
+                       :class="corrCategories.includes('{{ cat.id }}') ? 'bg-purple-50 border-purple-300' : ''">
+                  <input type="checkbox" value="{{ cat.id }}" x-model="corrCategories" class="sr-only">
+                  {{ cat.name }}
+                </label>
+                {% endfor %}
+              </div>
+            </div>
+            <!-- Risk note -->
+            <div class="mb-2">
+              <span class="text-[10px] text-slate-400 block mb-0.5">纠正后的风险提示(可选):</span>
+              <input type="text" x-model="corrNote" maxlength="100"
+                     class="w-full text-xs border border-slate-200 rounded-lg px-2.5 py-1.5 focus:border-purple-400 focus:ring-1 focus:ring-purple-200 outline-none"
+                     placeholder="输入纠正后的风险说明...">
+            </div>
+            <div class="flex items-center gap-2">
+              <button @click="submitCorrection('{{ change.id }}')"
+                      class="px-3 py-1 rounded-lg text-[11px] font-semibold bg-purple-600 text-white hover:bg-purple-700 transition-colors">提交纠偏</button>
+              <button @click="closeCorrection()"
+                      class="px-3 py-1 rounded-lg text-[11px] text-slate-400 hover:text-slate-600 transition-colors">取消</button>
+            </div>
           </div>
         </div>
       </div>
@@ -276,25 +327,28 @@
     <div class="max-w-7xl mx-auto flex items-center gap-4">
       <div class="flex-1 flex items-center gap-3">
         <div class="text-sm font-medium text-slate-600">
-          已确认 <span class="font-bold text-slate-800" x-text="confirmedCount">0</span> / <span x-text="totalChanges">{{ changes | length }}</span>
+          已审核 <span class="font-bold text-slate-800" x-text="reviewedCount">0</span> / <span x-text="totalChanges">{{ changes | length }}</span>
         </div>
         <div class="flex-1 max-w-xs bg-slate-100 rounded-full h-2 overflow-hidden">
           <div class="h-full bg-emerald-500 rounded-full transition-all duration-500"
                :style="'width: ' + confirmPct + '%'"></div>
         </div>
+        <span class="text-[11px] text-emerald-600 font-medium" x-text="'✓' + confirmedCount" x-show="confirmedCount > 0"></span>
+        <span class="text-[11px] text-red-500 font-medium" x-text="'✗' + rejectedCount" x-show="rejectedCount > 0"></span>
+        <span class="text-[11px] text-purple-500 font-medium" x-text="'✏' + correctedCount" x-show="correctedCount > 0"></span>
       </div>
       <button @click="downloadReport()"
-              :disabled="confirmedCount === 0"
+              :disabled="reviewedCount === 0"
               class="px-5 py-2 rounded-xl text-sm font-semibold transition-all duration-200"
-              :class="confirmedCount === totalChanges ? 'bg-slate-900 text-white hover:bg-slate-800 shadow-lg' : 'bg-slate-100 text-slate-400 cursor-not-allowed'"
-              x-text="confirmedCount === totalChanges ? '⬇ 下载确认报告' : '⬇ 下载报告 (' + confirmedCount + '条)'"></button>
+              :class="reviewedCount === totalChanges ? 'bg-slate-900 text-white hover:bg-slate-800 shadow-lg' : 'bg-slate-100 text-slate-400 cursor-not-allowed'"
+              x-text="reviewedCount === totalChanges ? '⬇ 下载审核报告' : '⬇ 下载报告 (' + reviewedCount + '条)'"></button>
     </div>
   </div>
 </div>
 
 <script>
 document.addEventListener('alpine:init', () => {
-  Alpine.store('confirmSet', []);
+  Alpine.store('verdicts', {});
 });
 
 function resultsPage() {
@@ -306,11 +360,18 @@ function resultsPage() {
     notes: {},
     saveMsg: '',
     hoverIdx: null,
+    correctionId: null,
+    corrLevel: 'medium',
+    corrCategories: [],
+    corrNote: '',
+
     get totalChanges() { return this.allChangeIds.length; },
-    get confirmed() { return Alpine.store('confirmSet'); },
-    get confirmedCount() { return this.confirmed.length; },
-    get confirmPct() { return this.totalChanges ? Math.round(this.confirmedCount / this.totalChanges * 100) : 0; },
-    get allSelected() { return this.confirmedCount >= this.totalChanges && this.totalChanges > 0; },
+    get verdicts() { return Alpine.store('verdicts'); },
+    get confirmedCount() { return Object.values(this.verdicts).filter(v => v.action === 'confirmed').length; },
+    get rejectedCount() { return Object.values(this.verdicts).filter(v => v.action === 'rejected').length; },
+    get correctedCount() { return Object.values(this.verdicts).filter(v => v.action === 'corrected').length; },
+    get reviewedCount() { return Object.keys(this.verdicts).length; },
+    get confirmPct() { return this.totalChanges ? Math.round(this.reviewedCount / this.totalChanges * 100) : 0; },
 
     // Floating nav: reactive change list respecting current filter
     get changeItems() {
@@ -334,7 +395,7 @@ function resultsPage() {
       }
     },
 
-    initConfirms(total) {
+    initVerdicts(verdictsJson) {
       // Build list of all change IDs with metadata for floating nav
       document.querySelectorAll('[data-change-id]').forEach(el => {
         const id = el.dataset.changeId;
@@ -343,15 +404,13 @@ function resultsPage() {
           risk: el.dataset.risk || 'low',
           type: el.dataset.type || 'modified',
           brief: el.dataset.brief || '',
+          categories: (() => { try { return JSON.parse(el.dataset.categories || '[]'); } catch(e) { return []; } })(),
         };
       });
-      // Load from localStorage
-      const jobId = window.location.pathname.split('/').pop();
-      const saved = localStorage.getItem('confirmed_' + jobId);
-      if (saved) {
-        try { Alpine.store('confirmSet', JSON.parse(saved)); } catch(e) {}
-      }
+      // Load verdicts from server data
+      Alpine.store('verdicts', verdictsJson || {});
       // Load existing notes from server
+      const jobId = window.location.pathname.split('/').pop();
       fetch('/api/results/' + jobId + '/json')
         .then(r => r.json())
         .then(data => {
@@ -360,6 +419,62 @@ function resultsPage() {
           });
         })
         .catch(() => {});
+    },
+
+    getVerdict(id) {
+      return this.verdicts[id] || null;
+    },
+
+    verdictLabel(action) {
+      return {confirmed: '人工已确认', rejected: '人工已驳回', corrected: '人工已纠偏'}[action] || '';
+    },
+
+    verdictBadgeClass(action) {
+      return {
+        confirmed: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
+        rejected: 'bg-red-100 text-red-700 border border-red-200',
+        corrected: 'bg-purple-100 text-purple-700 border border-purple-200',
+      }[action] || '';
+    },
+
+    setVerdict(id, action) {
+      this.verdicts[id] = {action};
+      this._saveVerdicts();
+    },
+
+    openCorrection(id) {
+      this.correctionId = id;
+      const v = this.verdicts[id] || {};
+      this.corrLevel = v.corrected_risk_level || this._changeMeta[id]?.risk || 'medium';
+      this.corrCategories = v.corrected_risk_categories || [...(this._changeMeta[id]?.categories || [])];
+      this.corrNote = v.corrected_risk_note || '';
+    },
+
+    closeCorrection() {
+      this.correctionId = null;
+    },
+
+    submitCorrection(id) {
+      this.verdicts[id] = {
+        action: 'corrected',
+        corrected_risk_level: this.corrLevel,
+        corrected_risk_categories: this.corrCategories,
+        corrected_risk_note: this.corrNote,
+      };
+      this.correctionId = null;
+      this._saveVerdicts();
+    },
+
+    _saveVerdicts() {
+      const jobId = window.location.pathname.split('/').pop();
+      fetch('/api/results/' + jobId + '/verdicts', {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({verdicts: this.verdicts}),
+      }).then(() => {
+        this.saveMsg = '__verdict__';
+        setTimeout(() => { this.saveMsg = ''; }, 2000);
+      }).catch(() => {});
     },
 
     getNote(id) {
@@ -379,31 +494,16 @@ function resultsPage() {
       }).catch(() => {});
     },
 
-    toggleOne(id) {
-      const set = Alpine.store('confirmSet');
-      const idx = set.indexOf(id);
-      if (idx >= 0) {
-        set.splice(idx, 1);
-      } else {
-        set.push(id);
-      }
-      const jobId = window.location.pathname.split('/').pop();
-      localStorage.setItem('confirmed_' + jobId, JSON.stringify(set));
-    },
-
-    isConfirmed(id) {
-      return Alpine.store('confirmSet').includes(id);
-    },
-
     selectAll() {
-      const set = Alpine.store('confirmSet');
-      if (this.allSelected) {
-        set.splice(0, set.length);
-      } else {
-        set.splice(0, set.length, ...this.allChangeIds);
+      const allConfirmed = this.reviewedCount >= this.totalChanges;
+      for (const id of this.allChangeIds) {
+        if (allConfirmed) {
+          delete this.verdicts[id];
+        } else if (!this.verdicts[id]) {
+          this.verdicts[id] = {action: 'confirmed'};
+        }
       }
-      const jobId = window.location.pathname.split('/').pop();
-      localStorage.setItem('confirmed_' + jobId, JSON.stringify(set));
+      this._saveVerdicts();
     },
 
     match(risk, type) {
@@ -414,7 +514,7 @@ function resultsPage() {
 
     downloadReport() {
       const jobId = window.location.pathname.split('/').pop();
-      const ids = Alpine.store('confirmSet').filter(Boolean);
+      const ids = Object.keys(this.verdicts).filter(Boolean);
       if (!ids.length) return;
       const url = '/api/results/' + jobId + '/pdf?ids=' + ids.join(',');
       window.open(url, '_blank');

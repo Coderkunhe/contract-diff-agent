@@ -125,6 +125,14 @@ def traditional_diff(diff_map: DiffMap) -> list[dict]:
             counter += 1
             brief = _make_brief(ctype, s1, s2, clause_ref_v2)
 
+            # Heuristic risk level when no LLM available
+            if ctype == "removed":
+                est_risk = "high"
+            elif ctype == "added":
+                est_risk = "medium"
+            else:
+                est_risk = "medium"
+
             changes.append({
                 "id": f"diff-{counter:03d}",
                 "change_type": ctype,
@@ -134,8 +142,8 @@ def traditional_diff(diff_map: DiffMap) -> list[dict]:
                 "v2_snippet": _truncate(s2, 500) if s2 else None,
                 "brief": brief,
                 "risk_categories": [],
-                "risk_level": "low",
-                "risk_note": "",
+                "risk_level": est_risk,
+                "risk_note": "风险等级由传统算法估算，未经LLM校验，请人工确认",
                 "attention_for": None,
                 "is_favorable": None,
                 "source": "algorithm",

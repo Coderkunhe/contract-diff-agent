@@ -511,6 +511,18 @@ def results_page(job_id: str, request: Request):
     sorted_freq = sorted(freq.items(), key=lambda x: x[1], reverse=True)[:8]
     max_freq_val = sorted_freq[0][1] if sorted_freq else 1
 
+    # Extract existing human verdicts for UI init
+    verdicts = {}
+    for change in data.get("changes", []):
+        hv = change.get("human_verdict")
+        if hv:
+            verdicts[change.get("id", "")] = {
+                "action": hv.get("action", "confirmed"),
+                "corrected_risk_level": hv.get("corrected_risk_level"),
+                "corrected_risk_categories": hv.get("corrected_risk_categories"),
+                "corrected_risk_note": hv.get("corrected_risk_note"),
+            }
+
     try:
         return _render(
             "results.html.jinja2",
@@ -519,7 +531,7 @@ def results_page(job_id: str, request: Request):
             cat_map=cat_map,
             sorted_freq=sorted_freq,
             max_freq_val=max_freq_val,
-            confirmed_ids=[],
+            verdicts_json=json.dumps(verdicts, ensure_ascii=False),
         )
     except Exception as e:
         # Fallback: render a simple JSON dump page
@@ -803,6 +815,77 @@ async def update_notes(job_id: str, request: Request):
         json.dump(data, f, ensure_ascii=False, indent=2)
 
     return JSONResponse({"updated": updated})
+
+
+@app.put("/api/results/{job_id}/verdicts")
+async def update_verdicts(job_id: str, request: Request):
+    """Save human verdicts (confirmed/rejected/corrected) for changes.
+
+    Accepts: {"verdicts": {change_id: {action, corrected_risk_level?,
+               corrected_risk_categories?, corrected_risk_note?}}}
+
+    Snapshots original LLM output before overwriting risk fields.
+    """
+    body = await request.json()
+    verdicts = body.get("verdicts", {})
+
+    result_path = None
+    with _JOBS_LOCK:
+        job = _JOBS.get(job_id)
+        if job:
+            result_path = job.get("result_path")
+    if not result_path:
+        fallback = _PROJECT_ROOT / "data" / "jobs" / f"{job_id}.json"
+        if fallback.exists():
+            result_path = str(fallback)
+    if not result_path or not os.path.exists(result_path):
+        return JSONResponse({"error": "not found"}, status_code=404)
+
+    with open(result_path, encoding="utf-8") as f:
+        data = json.load(f)
+
+    updated = 0
+    corrections = 0
+    now_ts = datetime.now(timezone.utc).isoformat()
+
+    for change in data.get("changes", []):
+        cid = change.get("id", "")
+        if cid not in verdicts:
+            continue
+        v = verdicts[cid]
+        action = v.get("action", "confirmed")
+
+        # Snapshot original LLM output if first time
+        existing = change.get("human_verdict") or {}
+        if not existing:
+            existing["original"] = {
+                "risk_level": change.get("risk_level", "medium"),
+                "risk_categories": list(change.get("risk_categories", []) or []),
+                "risk_note": change.get("risk_note", ""),
+            }
+
+        existing["action"] = action
+        existing["timestamp"] = existing.get("timestamp") or now_ts
+
+        if action == "corrected":
+            corrections += 1
+            if "corrected_risk_level" in v:
+                change["risk_level"] = v["corrected_risk_level"]
+                existing["corrected_risk_level"] = v["corrected_risk_level"]
+            if "corrected_risk_categories" in v:
+                change["risk_categories"] = v["corrected_risk_categories"]
+                existing["corrected_risk_categories"] = v["corrected_risk_categories"]
+            if "corrected_risk_note" in v:
+                change["risk_note"] = v["corrected_risk_note"]
+                existing["corrected_risk_note"] = v["corrected_risk_note"]
+
+        change["human_verdict"] = existing
+        updated += 1
+
+    with open(result_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+    return JSONResponse({"updated": updated, "corrections": corrections})
 
 
 @app.get("/api/results/{job_id}/json")

@@ -81,6 +81,49 @@ def _make_result(**overrides):
     return base
 
 
+def _make_result_with_verdicts():
+    """Build a result with human_verdict fields for V2 testing."""
+    result = _make_result()
+    changes = result["changes"]
+    # diff-001: confirmed by human
+    changes[0]["human_verdict"] = {
+        "action": "confirmed",
+        "timestamp": "2026-05-24T13:00:00Z",
+        "original": {
+            "risk_level": "high",
+            "risk_categories": ["R01"],
+            "risk_note": "验收时间缩短可能导致来不及充分检查",
+        },
+    }
+    # diff-002: corrected by human (LLM said medium R03, human says low R01)
+    changes[1]["human_verdict"] = {
+        "action": "corrected",
+        "corrected_risk_level": "low",
+        "corrected_risk_categories": ["R01"],
+        "corrected_risk_note": "保证金条款对商户影响不大",
+        "timestamp": "2026-05-24T13:05:00Z",
+        "original": {
+            "risk_level": "medium",
+            "risk_categories": ["R03"],
+            "risk_note": "新增保证金要求",
+        },
+    }
+    changes[1]["risk_level"] = "low"
+    changes[1]["risk_categories"] = ["R01"]
+    changes[1]["risk_note"] = "保证金条款对商户影响不大"
+    # diff-003: rejected by human (LLM hallucination)
+    changes[2]["human_verdict"] = {
+        "action": "rejected",
+        "timestamp": "2026-05-24T13:10:00Z",
+        "original": {
+            "risk_level": "high",
+            "risk_categories": ["R05"],
+            "risk_note": "知识产权条款被删除",
+        },
+    }
+    return result
+
+
 # ── Test extract_learning ──────────────────────────────────────────
 
 
@@ -181,10 +224,77 @@ class TestExtractLearning:
     def test_resolve_relative_data_dir(self, monkeypatch, tmp_path):
         """_resolve_dir with a relative path resolves against project root."""
         from src.pipeline.learning import _resolve_dir
-        # Use a tmp_path that's not absolute
         rel = Path("data/test_learnings")
         resolved = _resolve_dir(rel)
         assert resolved.is_absolute()
+
+    # ── V2: Human verdict extraction ──────────────────────────────
+
+    def test_extracts_human_verdict_feedback(self):
+        """V2: human_verdict fields produce correct feedback counts."""
+        result = _make_result_with_verdicts()
+        learning = extract_learning(result, "v2-001")
+
+        hf = learning["human_feedback"]
+        assert hf["feedback_count"] == 3
+        assert hf["confirmed_count"] == 1
+        assert hf["rejected_count"] == 1
+        assert hf["corrected_count"] == 1
+        assert hf["feedback_rate"] == 1.0  # 3/3 changes have feedback
+        assert abs(hf["llm_error_rate"] - 2 / 3) < 0.001  # round(2/3, 4) = 0.6667
+
+    def test_extracts_correction_patterns(self):
+        """V2: corrected verdicts track category and level-shift patterns."""
+        result = _make_result_with_verdicts()
+        learning = extract_learning(result, "v2-002")
+
+        hf = learning["human_feedback"]
+        # diff-002 was corrected from R03→R01
+        assert len(hf["most_corrected_categories"]) >= 1
+        assert hf["most_corrected_categories"][0]["id"] == "R01"
+
+        # diff-002 was corrected from medium→low
+        shifts = hf["correction_direction"]
+        assert any(s["from"] == "medium" and s["to"] == "low" for s in shifts)
+
+    def test_backward_compat_no_human_verdict(self):
+        """V2: old result JSONs without human_verdict produce zero feedback."""
+        result = _make_result()  # No human_verdict fields
+        learning = extract_learning(result, "old-001")
+
+        hf = learning["human_feedback"]
+        assert hf["feedback_count"] == 0
+        assert hf["confirmed_count"] == 0
+        assert hf["llm_error_rate"] == 0
+        assert learning["correction_examples"] == []
+
+    def test_correction_examples_capped(self):
+        """V2: correction_examples are capped at 10."""
+        result = _make_result()
+        changes = result["changes"]
+        # Create 15 corrected changes
+        for i in range(15):
+            cid = f"diff-{i+10:03d}"
+            changes.append({
+                "id": cid,
+                "change_type": "modified",
+                "brief": f"Change {i}",
+                "risk_categories": [f"R0{(i % 10) + 1}"],
+                "risk_level": "low",
+                "risk_note": "",
+                "validation": {"l3_verdict": "confirmed", "confidence": 0.9, "status": "verified"},
+                "human_note": None,
+                "human_verdict": {
+                    "action": "corrected",
+                    "corrected_risk_level": "medium",
+                    "timestamp": "2026-05-24T14:00:00Z",
+                    "original": {"risk_level": "high", "risk_categories": ["R04"], "risk_note": ""},
+                },
+            })
+            changes[-1]["risk_level"] = "medium"
+        result["diff_summary"]["total_changes"] = len(changes)
+        learning = extract_learning(result, "cap001")
+        assert len(learning["correction_examples"]) <= 10
 
 
 # ── Test save / load ───────────────────────────────────────────────
@@ -234,6 +344,34 @@ class TestSaveAndLoad:
         (tmp_path / "index.json").write_text("{not valid json")
         past = load_past_learnings(data_dir=tmp_path)
         assert past == []
+
+    def test_load_full_learnings(self, tmp_path):
+        """V2: full=True loads per-run JSON files with human_feedback."""
+        result = _make_result_with_verdicts()
+        learning = extract_learning(result, "full001")
+        save_learning(learning, data_dir=tmp_path)
+
+        past = load_past_learnings(limit=5, full=True, data_dir=tmp_path)
+        assert len(past) >= 1
+        full_record = past[0]
+        # Full record should have human_feedback (not just index summary)
+        hf = full_record.get("human_feedback", {})
+        assert hf.get("confirmed_count") == 1
+        assert hf.get("corrected_count") == 1
+        assert hf.get("rejected_count") == 1
+
+    def test_load_full_falls_back_to_index_entry(self, tmp_path):
+        """V2: full=True gracefully falls back if per-run file missing."""
+        result = _make_result()
+        learning = extract_learning(result, "missingfile")
+        save_learning(learning, data_dir=tmp_path)
+        # Delete the per-run file
+        (tmp_path / "run-missingfile.json").unlink()
+
+        past = load_past_learnings(limit=5, full=True, data_dir=tmp_path)
+        assert len(past) >= 1
+        # Should be the index entry (has top_category, not human_feedback)
+        assert "total_changes" in past[0]
 
 
 # ── Test format_learnings_context ──────────────────────────────────
@@ -303,6 +441,27 @@ class TestFormatContext:
         ctx = format_learnings_context(learnings)
         assert "N/A" in ctx
 
+    def test_format_correction_context(self):
+        """V2: format_learnings_context includes 人工纠偏经验 block."""
+        result = _make_result_with_verdicts()
+        learning = extract_learning(result, "fmt001")
+        # Pass the full learning record (not just index entry)
+        ctx = format_learnings_context([learning])
+
+        assert "人工纠偏经验" in ctx
+        assert "LLM常在这些类别上误判风险" in ctx
+        assert "具体纠偏案例" in ctx
+        # Should mention the corrected change
+        assert "diff-002" in ctx
+
+    def test_format_no_correction_block_without_data(self):
+        """V2: No 人工纠偏经验 block when no corrections exist."""
+        result = _make_result()  # No human_verdict
+        learning = extract_learning(result, "nocorr")
+        ctx = format_learnings_context([learning])
+
+        assert "人工纠偏经验" not in ctx
+
 
 # ── Update_index ───────────────────────────────────────────────────
 
@@ -332,3 +491,19 @@ class TestUpdateIndex:
         index = _load_index(tmp_path)
         assert index["total_runs"] == 4
         assert index["global_trends"]["total_human_corrections"] == 4
+
+    def test_index_includes_human_feedback_fields(self, tmp_path):
+        """V2: index run_entry and global_trends include human feedback."""
+        result = _make_result_with_verdicts()
+        learning = extract_learning(result, "hfindx")
+        save_learning(learning, data_dir=tmp_path)
+
+        index = _load_index(tmp_path)
+        run = index["runs"][0]
+        assert run["human_confirmed"] == 1
+        assert run["human_corrected"] == 1
+        assert run["human_rejected"] == 1
+
+        trends = index["global_trends"]
+        assert trends["total_human_feedback"] == 3
+        assert "avg_llm_error_rate" in trends

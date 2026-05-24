@@ -10,6 +10,7 @@ LLM failure is non-fatal — original changes are returned untouched.
 """
 
 import json
+import re
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -22,6 +23,23 @@ from src.llm.client import AutoFallbackClient
 from src.prompts.identifier import build_enhance_system_prompt, build_enhance_user_prompt
 
 _COUNTER_LOCK = threading.Lock()
+
+_MD_FENCE_RE = re.compile(r"```(?:json)?\s*\n?(.*?)\n?```", re.DOTALL)
+
+
+def _clean_llm_json(content: str) -> str:
+    """Strip markdown code fences and common LLM artifacts from JSON response."""
+    content = content.strip()
+    # Try extracting JSON from markdown code block
+    m = _MD_FENCE_RE.match(content)
+    if m:
+        content = m.group(1).strip()
+    # Remove any trailing markdown fences
+    if content.startswith("```"):
+        content = content[3:].strip()
+    if content.endswith("```"):
+        content = content[:-3].strip()
+    return content
 
 
 def enhance_changes(
@@ -117,6 +135,7 @@ def enhance_changes(
                     parts.append(chunk.choices[0].delta.content)
 
             content = "".join(parts)
+            content = _clean_llm_json(content)
             raw = json.loads(repair_json(content))
             enhanced_map = {e["id"]: e for e in raw.get("enhanced", [])}
 

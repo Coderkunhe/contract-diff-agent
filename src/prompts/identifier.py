@@ -69,7 +69,7 @@ def build_enhance_system_prompt() -> str:
 
     if load_past_learnings and format_learnings_context:
         try:
-            past = load_past_learnings(limit=5)
+            past = load_past_learnings(limit=5, full=True)
             ctx = format_learnings_context(past)
             if ctx:
                 base = ctx + "\n\n" + base

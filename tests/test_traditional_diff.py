@@ -167,7 +167,8 @@ class TestTraditionalDiff:
             assert c.get("source") == "algorithm"
             assert c.get("human_note") is None
             assert c.get("risk_categories") == []
-            assert c.get("risk_level") == "low"
+            assert c.get("risk_level") in ("high", "medium", "low")
+            assert "传统算法估算" in c.get("risk_note", "")
 
     def test_offline_pipeline_no_llm_dependency(self, diff_map):
         """Integration: traditional_diff runs on real aligned contracts without any LLM."""

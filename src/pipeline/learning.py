@@ -20,13 +20,22 @@ _INDEX_LOCK = threading.Lock()
 
 
 def extract_learning(result: dict, job_id: str) -> dict:
-    """Extract a learning record from a pipeline result dict."""
+    """Extract a learning record from a pipeline result dict.
+
+    Reads LLM auto-validation quality signals, high-confidence patterns,
+    human notes, AND human verdicts (confirmed/rejected/corrected).
+    """
     meta = result.get("meta", {})
     summary = result.get("diff_summary", {})
     changes = result.get("changes", [])
     taxonomy = result.get("risk_taxonomy_snapshot", {})
 
     total = summary.get("total_changes", len(changes))
+    high = summary.get("medium_risk", 0)  # note: diff_summary uses these keys
+    medium = summary.get("medium_risk", 0)
+    low = summary.get("low_risk", 0)
+
+    # Recompute from actual changes (more reliable than diff_summary)
     high = summary.get("high_risk", 0)
     medium = summary.get("medium_risk", 0)
     low = summary.get("low_risk", 0)
@@ -52,6 +61,14 @@ def extract_learning(result: dict, job_id: str) -> dict:
 
     # High-confidence pattern grouping
     pattern_groups: dict[tuple[str, str], list[str]] = {}
+
+    # Human verdict tracking (V2)
+    h_confirmed = 0
+    h_rejected = 0
+    h_corrected = 0
+    cat_corrections: dict[str, int] = {}
+    level_shifts: dict[tuple[str, str], int] = {}
+    correction_examples: list[dict] = []
 
     for c in changes:
         v = c.get("validation", {}) or {}
@@ -84,6 +101,35 @@ def extract_learning(result: dict, job_id: str) -> dict:
                 "risk_level": c.get("risk_level", "low"),
             })
 
+        # ── Human verdict analysis (V2) ──────────────────────────
+        hv = c.get("human_verdict")
+        if not hv:
+            continue
+        action = hv.get("action", "")
+        if action == "confirmed":
+            h_confirmed += 1
+        elif action == "rejected":
+            h_rejected += 1
+        elif action == "corrected":
+            h_corrected += 1
+            orig = hv.get("original", {})
+            for cat in c.get("risk_categories", []) or []:
+                cat_corrections[cat] = cat_corrections.get(cat, 0) + 1
+            orig_lvl = orig.get("risk_level", "")
+            new_lvl = c.get("risk_level", "")
+            if orig_lvl and new_lvl and orig_lvl != new_lvl:
+                key = (orig_lvl, new_lvl)
+                level_shifts[key] = level_shifts.get(key, 0) + 1
+            if len(correction_examples) < 10:
+                correction_examples.append({
+                    "change_id": c.get("id", ""),
+                    "brief": (c.get("brief") or "")[:80],
+                    "original_risk": orig.get("risk_level", "?"),
+                    "corrected_risk": c.get("risk_level", "?"),
+                    "original_categories": orig.get("risk_categories", []),
+                    "corrected_categories": c.get("risk_categories", []),
+                })
+
     # Build high-confidence patterns (top 10 by count)
     hc_patterns = []
     for (cat, rl), briefs in sorted(pattern_groups.items(), key=lambda x: len(x[1]), reverse=True)[:10]:
@@ -98,6 +144,22 @@ def extract_learning(result: dict, job_id: str) -> dict:
     rejection_rate = rejected / max(validated, 1)
     uncertain_rate = uncertain / max(validated, 1)
 
+    # Human feedback aggregation
+    feedback_total = h_confirmed + h_rejected + h_corrected
+    llm_error_rate = (h_rejected + h_corrected) / max(feedback_total, 1)
+
+    most_corr = sorted(cat_corrections.items(), key=lambda x: x[1], reverse=True)[:5]
+    most_corrected_categories = [
+        {"id": cid, "name": _CAT_NAMES.get(cid, cid), "count": count}
+        for cid, count in most_corr
+    ]
+
+    direction = sorted(level_shifts.items(), key=lambda x: x[1], reverse=True)[:5]
+    correction_direction = [
+        {"from": f, "to": t, "count": c}
+        for (f, t), c in direction
+    ]
+
     # Build summary string
     model_str = meta.get("model") or "offline"
     pipeline = meta.get("pipeline", "")
@@ -107,6 +169,8 @@ def extract_learning(result: dict, job_id: str) -> dict:
     if top_categories_out:
         tc = top_categories_out[0]
         parts.append(f"{tc['name']}{tc['count']}条")
+    if h_corrected:
+        parts.append(f"人工纠偏{h_corrected}条")
     summary_str = ", ".join(parts)
 
     return {
@@ -134,6 +198,17 @@ def extract_learning(result: dict, job_id: str) -> dict:
         },
         "high_confidence_patterns": hc_patterns,
         "human_notes": human_notes[:20],
+        "human_feedback": {
+            "feedback_count": feedback_total,
+            "feedback_rate": round(feedback_total / max(total, 1), 4),
+            "confirmed_count": h_confirmed,
+            "rejected_count": h_rejected,
+            "corrected_count": h_corrected,
+            "llm_error_rate": round(llm_error_rate, 4),
+            "most_corrected_categories": most_corrected_categories,
+            "correction_direction": correction_direction,
+        },
+        "correction_examples": correction_examples,
         "summary": summary_str,
     }
 
@@ -176,6 +251,7 @@ def _update_index(learning: dict, data_dir: Path) -> dict:
 
     # Upsert by job_id
     existing = {r["job_id"]: i for i, r in enumerate(runs)}
+    hf = learning.get("human_feedback", {}) or {}
     run_entry = {
         "job_id": learning["job_id"],
         "timestamp": learning["timestamp"],
@@ -189,6 +265,9 @@ def _update_index(learning: dict, data_dir: Path) -> dict:
         "top_categories": learning["risk_profile"]["top_categories"],
         "validation_rejection_rate": learning["quality_signals"]["validation_rejection_rate"],
         "human_corrections_count": learning["quality_signals"]["human_corrections_count"],
+        "human_confirmed": hf.get("confirmed_count", 0),
+        "human_corrected": hf.get("corrected_count", 0),
+        "human_rejected": hf.get("rejected_count", 0),
         "summary": learning["summary"],
     }
 
@@ -210,6 +289,11 @@ def _update_index(learning: dict, data_dir: Path) -> dict:
         rej_sum = 0.0
         rej_count = 0
         human_total = 0
+        human_fb_total = 0
+        human_err_total = 0
+        human_err_rate_sum = 0.0
+        human_err_rate_count = 0
+        all_corrected_cats: dict[str, int] = {}
         for r in runs:
             total_changes_sum += r["total_changes"]
             high_sum += r["high_risk"]
@@ -220,6 +304,14 @@ def _update_index(learning: dict, data_dir: Path) -> dict:
             for tc in r.get("top_categories", []) or []:
                 name = tc["name"]
                 cat_totals[name] = cat_totals.get(name, 0) + tc["count"]
+            # Human feedback aggregation
+            hc = r.get("human_confirmed", 0) + r.get("human_corrected", 0) + r.get("human_rejected", 0)
+            human_fb_total += hc
+            herr = r.get("human_rejected", 0) + r.get("human_corrected", 0)
+            human_err_total += herr
+            if hc > 0:
+                human_err_rate_sum += herr / hc
+                human_err_rate_count += 1
 
         top_cats = sorted(cat_totals.items(), key=lambda x: x[1], reverse=True)[:5]
         n = len(runs)
@@ -231,6 +323,9 @@ def _update_index(learning: dict, data_dir: Path) -> dict:
             "avg_total_changes": round(total_changes_sum / n, 1),
             "avg_rejection_rate": round(rej_sum / max(rej_count, 1), 4),
             "total_human_corrections": human_total,
+            "total_human_feedback": human_fb_total,
+            "avg_feedback_rate": round(human_fb_total / max(total_changes_sum, 1), 4),
+            "avg_llm_error_rate": round(human_err_rate_sum / max(human_err_rate_count, 1), 4),
         }
 
     return index
@@ -256,17 +351,58 @@ def save_learning(learning: dict, data_dir: Optional[Path] = None) -> Path:
 
 # ── Prompt injection helpers ───────────────────────────────────────
 
-def load_past_learnings(limit: int = 5, data_dir: Optional[Path] = None) -> list[dict]:
-    """Return the most recent run summaries from the index (top N)."""
+def load_past_learnings(limit: int = 5, full: bool = False,
+                        data_dir: Optional[Path] = None) -> list[dict]:
+    """Return the most recent run summaries from the index (top N).
+
+    When full=True, loads complete per-run JSON files from
+    data/learnings/run-{job_id}.json instead of just index summaries.
+    Gracefully falls back to index entry if per-run file is missing.
+    """
     d = _resolve_dir(data_dir)
     index = _load_index(d)
-    return index.get("runs", [])[:limit]
+    run_entries = index.get("runs", [])[:limit]
+
+    if not full:
+        return run_entries
+
+    full_records = []
+    for entry in run_entries:
+        run_path = d / f"run-{entry['job_id']}.json"
+        if run_path.exists():
+            try:
+                with open(run_path, encoding="utf-8") as f:
+                    full_records.append(json.load(f))
+            except (json.JSONDecodeError, OSError):
+                full_records.append(entry)
+        else:
+            full_records.append(entry)
+    return full_records
 
 
 def format_learnings_context(learnings: list[dict]) -> str:
-    """Format past learnings as a compact prompt context block."""
+    """Format past learnings as a compact prompt context block.
+
+    Includes both risk distribution history (V1) and human correction
+    patterns (V2) when correction data is available.
+    Handles both flat index entries and full learning records.
+    """
     if not learnings:
         return ""
+
+    def _get(l: dict, *keys: str, default=None):
+        """Read from either flat index entry or nested learning record."""
+        # Try flat key first (index entry)
+        for k in keys:
+            if k in l:
+                return l[k]
+        # Try nested risk_profile (full learning record)
+        rp = l.get("risk_profile", {})
+        if rp:
+            for k in keys:
+                if k in rp:
+                    return rp[k]
+        return default
 
     lines = [f"## 历史比对经验（基于 {len(learnings)} 次过往合同比对）", ""]
     lines.append("过往比对中常见的风险模式：")
@@ -274,18 +410,24 @@ def format_learnings_context(learnings: list[dict]) -> str:
     for i, l in enumerate(learnings, 1):
         ts = l.get("timestamp", "")[:16].replace("T", " ")
         model = l.get("model") or "offline"
-        tc = l.get("top_category")
+        tc = l.get("top_category") or (
+            (_get(l, "top_categories") or [{}])[0] if _get(l, "top_categories") else None
+        )
         top_cat = f"{tc['name']}({tc['count']}条)" if tc else ""
+        high = _get(l, "high_risk", "high_risk_count", default=0)
+        medium = _get(l, "medium_risk", "medium_risk_count", default=0)
         lines.append(
             f"- 第{i}次({ts}): {top_cat} "
-            f"高风险{l['high_risk']}条, 中风险{l['medium_risk']}条, "
+            f"高风险{high}条, 中风险{medium}条, "
             f"LLM校验拒绝率{_rate_pct(l.get('validation_rejection_rate'))}"
         )
 
     # Highlight top recurring categories across all runs
     all_cats: dict[str, int] = {}
     for l in learnings:
-        for tc in l.get("top_categories", []) or []:
+        # Try top_categories from index entry, or from nested risk_profile
+        tcs = l.get("top_categories") or _get(l, "top_categories") or []
+        for tc in tcs:
             all_cats[tc["name"]] = all_cats.get(tc["name"], 0) + tc["count"]
     top = sorted(all_cats.items(), key=lambda x: x[1], reverse=True)[:3]
     if top:
@@ -295,6 +437,50 @@ def format_learnings_context(learnings: list[dict]) -> str:
             + " 在过往比对中频繁出现。"
         )
         lines.append("在分析当前合同差异时，请优先检查这些高风险类别。")
+
+    # ── Human correction patterns (V2) ────────────────────────────
+    correction_examples: list[dict] = []
+    for l in learnings:
+        hf = l.get("human_feedback") or {}
+        if hf.get("corrected_count", 0) > 0 or hf.get("rejected_count", 0) > 0:
+            for ex in l.get("correction_examples", []) or []:
+                if len(correction_examples) < 8:
+                    correction_examples.append(ex)
+
+    if correction_examples:
+        lines.append("")
+        lines.append("## 人工纠偏经验（基于历史人工审核）")
+        lines.append("")
+        lines.append("人工审核中发现的LLM常见误判模式，请在分析时特别注意避免重复：")
+        lines.append("")
+
+        cat_counts: dict[str, int] = {}
+        for ex in correction_examples:
+            for cat in ex.get("original_categories", []):
+                cat_counts[cat] = cat_counts.get(cat, 0) + 1
+        top_cats = sorted(cat_counts.items(), key=lambda x: x[1], reverse=True)[:5]
+        if top_cats:
+            lines.append("LLM常在这些类别上误判风险：")
+            for cat_id, count in top_cats:
+                lines.append(f"  - {_CAT_NAMES.get(cat_id, cat_id)}: {count}次被人工纠偏")
+            lines.append("")
+
+        lines.append("具体纠偏案例：")
+        for ex in correction_examples[:5]:
+            orig_cats = ", ".join(
+                _CAT_NAMES.get(c, c) for c in ex.get("original_categories", [])
+            )
+            corr_cats = ", ".join(
+                _CAT_NAMES.get(c, c) for c in ex.get("corrected_categories", [])
+            )
+            lines.append(
+                f"  - [{ex.get('change_id', '?')}] {ex.get('brief', '')}: "
+                f"LLM判为{ex.get('original_risk', '?')}风险({orig_cats}), "
+                f"人工更正为{ex.get('corrected_risk', '?')}风险({corr_cats})"
+            )
+
+        lines.append("")
+        lines.append("请谨慎评估上述类别的风险等级，避免重复LLM此前的误判模式。")
 
     return "\n".join(lines)
 

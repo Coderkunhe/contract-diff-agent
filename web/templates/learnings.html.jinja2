@@ -43,6 +43,15 @@
         </template>
       </div>
     </div>
+    <!-- Human feedback trend (V2) -->
+    <div class="mt-3 pt-3 border-t border-slate-100" x-show="trends.total_human_feedback > 0">
+      <div class="flex items-center gap-2 justify-center flex-wrap text-xs">
+        <span class="text-slate-400">人工反馈趋势:</span>
+        <span class="font-medium text-slate-600" x-text="'累计反馈 ' + trends.total_human_feedback + ' 条'"></span>
+        <span class="text-slate-300">|</span>
+        <span class="font-medium text-purple-500" x-text="'LLM平均误判率 ' + (trends.avg_llm_error_rate * 100).toFixed(0) + '%'"></span>
+      </div>
+    </div>
   </div>
 
   <!-- Empty state -->
@@ -118,9 +127,12 @@
         </div>
 
         <!-- Top category tag -->
-        <div class="flex items-center gap-1.5 flex-wrap" x-show="run.top_category">
-          <span class="text-[10px] px-2 py-0.5 rounded-full bg-accent-50 text-accent-700 font-medium" x-text="run.top_category.name + ' (' + run.top_category.count + ')'"></span>
+        <div class="flex items-center gap-1.5 flex-wrap" x-show="run.top_category || run.human_confirmed || run.human_rejected || run.human_corrected">
+          <span class="text-[10px] px-2 py-0.5 rounded-full bg-accent-50 text-accent-700 font-medium" x-show="run.top_category" x-text="run.top_category ? run.top_category.name + ' (' + run.top_category.count + ')' : ''"></span>
           <span class="text-[10px] text-slate-400" x-show="run.human_corrections_count > 0" x-text="'✏️ ' + run.human_corrections_count"></span>
+          <span class="text-[10px] text-emerald-500" x-show="run.human_confirmed > 0" x-text="'✓' + run.human_confirmed"></span>
+          <span class="text-[10px] text-red-400" x-show="run.human_rejected > 0" x-text="'✗' + run.human_rejected"></span>
+          <span class="text-[10px] text-purple-400" x-show="run.human_corrected > 0" x-text="'✏' + run.human_corrected"></span>
         </div>
       </div>
     </template>
