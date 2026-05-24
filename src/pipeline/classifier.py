@@ -55,22 +55,18 @@ def classify_changes(
         user_prompt = f"风险分类以下合同差异:\n{json.dumps(changes_json, ensure_ascii=False)}"
 
         try:
-            response = client.create(
+            response = client.create_race(
+                race_count=cfg.llm_race_count,
                 max_tokens=cfg.classify_max_tokens,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
-                stream=True,
+                stream=False,
                 response_format={"type": "json_object"},
             )
 
-            parts = []
-            for chunk in response:
-                if chunk.choices and chunk.choices[0].delta.content:
-                    parts.append(chunk.choices[0].delta.content)
-
-            content = "".join(parts)
+            content = response.choices[0].message.content
             result = json.loads(repair_json(content))
 
             lookup = {c["id"]: c for c in result.get("classified", [])}

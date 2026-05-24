@@ -105,6 +105,7 @@ class AppConfig:
     # ── Concurrency ───────────────────────────────────────────────────
     enhance_workers: int = 5
     validate_workers: int = 8
+    llm_race_count: int = 3              # models to race concurrently per call
 
     # ── Web ───────────────────────────────────────────────────────────
     max_jobs: int = 20
@@ -183,6 +184,7 @@ class AppConfig:
             # Concurrency
             enhance_workers=int(_env("ENHANCE_WORKERS", "5")),
             validate_workers=int(_env("VALIDATE_WORKERS", "8")),
+            llm_race_count=int(_env("LLM_RACE_COUNT", "3")),
 
             # Web
             max_jobs=int(_env("MAX_JOBS", "20")),

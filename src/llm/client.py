@@ -84,3 +84,50 @@ class AutoFallbackClient:
         raise RuntimeError(
             f"所有模型均不可用。最后错误: {last_error}"
         )
+
+    def create_race(self, race_count: int = 3, **kwargs) -> Any:
+        """Fire prompt to N models concurrently, return the first success.
+
+        Losing requests are cancelled. If all fail, raises RuntimeError.
+        """
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        kwargs.pop("model", None)
+
+        candidates = [m for m in self._pool if is_model_available(m)][:race_count]
+        if not candidates:
+            raise RuntimeError("无可用模型参与竞速 (所有模型均在冷却中)")
+
+        def _call_one(model_id: str):
+            model_info = next((m for m in MODEL_POOL if m["id"] == model_id), None)
+            provider = model_info["provider"] if model_info else "gmi"
+            label = model_info["label"] if model_info else model_id
+            try:
+                client = self._get_client(provider)
+                response = client.chat.completions.create(
+                    model=model_id, **kwargs,
+                )
+                mark_model_success(model_id)
+                return (model_id, provider, label, response, None)
+            except Exception as exc:
+                mark_model_failure(model_id)
+                return (model_id, provider, label, None, exc)
+
+        errors: list[tuple[str, str]] = []
+        with ThreadPoolExecutor(max_workers=len(candidates)) as executor:
+            futures = {executor.submit(_call_one, m): m for m in candidates}
+            for future in as_completed(futures):
+                model_id, provider, label, response, error = future.result()
+                if response is not None:
+                    self._used_model = model_id
+                    self._used_provider = provider
+                    for f in futures:
+                        f.cancel()
+                    print(f"  🏎️ 竞速胜出: {label} ({model_id})")
+                    return response
+                if error:
+                    errors.append((label, str(error)[:80]))
+
+        raise RuntimeError(
+            f"竞速全部失败 ({len(candidates)} 模型): {errors}"
+        )
