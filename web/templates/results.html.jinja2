@@ -95,7 +95,18 @@
   <div class="hidden lg:block fixed right-[max(1rem,calc((100vw-80rem)/2-3.5rem))] top-[50%] -translate-y-1/2 z-50"
        x-show="changeItems.length > 0"
        x-transition>
-    <div class="bg-white/95 backdrop-blur-md rounded-2xl border border-slate-200 shadow-xl p-3 w-[68px] max-h-[60vh] overflow-hidden flex flex-col">
+    <div class="relative bg-white/95 backdrop-blur-md rounded-2xl border border-slate-200 shadow-xl p-3 w-[68px] max-h-[60vh] overflow-hidden flex flex-col">
+
+      <!-- Tooltip: positioned to the left of nav bar -->
+      <div class="absolute right-full mr-2 top-1/2 -translate-y-1/2 pointer-events-none"
+           x-show="hoverIdx !== null"
+           x-transition:enter="transition ease-out duration-150"
+           x-transition:enter-start="opacity-0 translate-x-2"
+           x-transition:enter-end="opacity-100 translate-x-0">
+        <div class="bg-slate-900 text-white text-[11px] px-2.5 py-1.5 rounded-lg shadow-lg max-w-[180px] truncate whitespace-nowrap"
+             x-text="hoverIdx !== null ? (changeItems[hoverIdx]?.brief || changeItems[hoverIdx]?.id) : ''"></div>
+      </div>
+
       <div class="text-[10px] font-bold text-slate-500 text-center mb-2 flex-shrink-0"
            x-text="confirmedCount + '/' + changeItems.length"></div>
       <div class="flex-1 overflow-y-auto scrollbar-thin">
@@ -122,17 +133,6 @@
         <span class="w-2 h-2 rounded-full bg-slate-300" title="低风险未确认"></span>
       </div>
     </div>
-  </div>
-
-  <!-- Tooltip on hover -->
-  <div class="hidden lg:block fixed z-50 pointer-events-none"
-       x-show="hoverIdx !== null"
-       style="right: max(9rem, calc((100vw-80rem)/2+1rem)); top: 50%;"
-       x-transition:enter="transition ease-out duration-150"
-       x-transition:enter-start="opacity-0 translate-x-2"
-       x-transition:enter-end="opacity-100 translate-x-0">
-    <div class="bg-slate-900 text-white text-[11px] px-2.5 py-1.5 rounded-lg shadow-lg max-w-[200px] truncate"
-         x-text="hoverIdx !== null ? (changeItems[hoverIdx]?.brief || changeItems[hoverIdx]?.id) : ''"></div>
   </div>
 
   <!-- Changes list -->
