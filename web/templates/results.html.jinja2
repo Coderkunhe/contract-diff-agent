@@ -99,20 +99,19 @@
       <div class="text-[10px] font-bold text-slate-500 text-center mb-2 flex-shrink-0"
            x-text="confirmedCount + '/' + changeItems.length"></div>
       <div class="flex-1 overflow-y-auto scrollbar-thin">
-        <div class="flex flex-col gap-[2px]">
+        <div class="flex flex-col gap-[3px]">
           <template x-for="(item, idx) in changeItems" :key="item.id">
             <button @click="scrollTo(item.id); hoverIdx = idx"
                     @mouseenter="hoverIdx = idx"
                     @mouseleave="hoverIdx = null"
-                    class="w-full h-[6px] rounded-full transition-all duration-150 hover:scale-125 hover:ring-1 hover:ring-slate-300 cursor-pointer flex-shrink-0"
+                    class="w-full h-[9px] rounded-full transition-all duration-150 hover:scale-125 hover:ring-1 hover:ring-slate-300 cursor-pointer flex-shrink-0"
                     :class="{
                       'bg-emerald-400': isConfirmed(item.id),
                       'bg-red-400': !isConfirmed(item.id) && item.risk === 'high',
                       'bg-amber-400': !isConfirmed(item.id) && item.risk === 'medium',
                       'bg-slate-300': !isConfirmed(item.id) && item.risk === 'low',
                       'ring-2 ring-slate-500 scale-125': hoverIdx === idx
-                    }"
-                    :title="item.brief || item.id"></button>
+                    }"></button>
           </template>
         </div>
       </div>
