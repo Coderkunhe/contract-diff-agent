@@ -384,3 +384,19 @@ class TestLearningsPage:
         resp = client.get("/learnings")
         assert resp.status_code == 200
         assert "暂无进化记录" in resp.text
+
+
+class TestDemo:
+    def test_demo_redirects(self):
+        """GET /demo redirects to /job/{id} with 303."""
+        resp = client.get("/demo", follow_redirects=False)
+        assert resp.status_code == 303
+        assert resp.headers["location"].startswith("/job/")
+
+    def test_demo_creates_job(self):
+        """GET /demo creates a job in _JOBS."""
+        resp = client.get("/demo", follow_redirects=False)
+        assert resp.status_code == 303
+        job_id = resp.headers["location"].split("/")[-1]
+        with _JOBS_LOCK:
+            assert job_id in _JOBS

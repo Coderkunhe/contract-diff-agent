@@ -118,8 +118,27 @@
       </div>
     </div>
 
+    <!-- One-click demo -->
+    <div class="animate-fade-in stagger-4 pb-1">
+      <a href="/demo"
+         class="flex items-center gap-4 bg-gradient-to-r from-accent-50 to-brand-50 rounded-2xl border border-brand-200/50 p-5 hover:border-brand-300 hover:shadow-md hover:shadow-brand-50 transition-all group">
+        <div class="flex-shrink-0 w-11 h-11 rounded-xl bg-brand-600 text-white flex items-center justify-center group-hover:scale-110 transition-transform">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+          </svg>
+        </div>
+        <div class="flex-1">
+          <div class="font-semibold text-slate-800 text-sm">一键快速体验</div>
+          <div class="text-xs text-slate-500 mt-0.5">用内置天猫服务协议样本立刻体验合同比对全流程</div>
+        </div>
+        <svg class="w-5 h-5 text-brand-400 group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+        </svg>
+      </a>
+    </div>
+
     <!-- Thorough mode toggle -->
-    <div class="animate-fade-in stagger-4">
+    <div class="animate-fade-in stagger-5">
       <label class="flex items-center gap-3 bg-white rounded-2xl border border-slate-200 p-5 cursor-pointer hover:border-brand-300 transition-all">
         <input type="checkbox" name="thorough" value="1" class="w-5 h-5 rounded accent-brand-600">
         <div>
@@ -130,7 +149,7 @@
     </div>
 
     <!-- Submit -->
-    <div class="pt-2 animate-fade-in stagger-5">
+    <div class="pt-2 animate-fade-in stagger-6">
       <button type="submit"
               :disabled="!v1Name || !v2Name"
               class="w-full py-4 rounded-2xl font-semibold text-lg transition-all duration-300 flex items-center justify-center gap-2"

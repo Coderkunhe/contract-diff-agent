@@ -12,6 +12,7 @@ import json
 import os
 import queue
 import re
+import shutil
 import sys
 import threading
 import time
@@ -384,6 +385,52 @@ async def upload_files(v1_file: UploadFile = File(...), v2_file: UploadFile = Fi
         print(f"[UPLOAD] Job {job_id} started: {v1_name} vs {v2_name}")
     except Exception as exc:
         print(f"[UPLOAD] Failed to start pipeline: {exc}")
+
+    return RedirectResponse(url=f"/job/{job_id}", status_code=303)
+
+
+@app.get("/demo")
+def demo_start():
+    """One-click demo: auto-start comparison with built-in sample contracts."""
+    sample_v1 = _PROJECT_ROOT / "docs" / "天猫服务协议2015(2).pdf"
+    sample_v2 = _PROJECT_ROOT / "docs" / "天猫服务协议2026(2).pdf"
+
+    if not sample_v1.exists() or not sample_v2.exists():
+        return HTMLResponse("Sample PDFs not found. Run from repo root.", status_code=500)
+
+    job_id = uuid.uuid4().hex[:8]
+    upload_dir = _PROJECT_ROOT / "data" / "uploads" / job_id
+    upload_dir.mkdir(parents=True, exist_ok=True)
+
+    shutil.copy2(sample_v1, upload_dir / "v1.pdf")
+    shutil.copy2(sample_v2, upload_dir / "v2.pdf")
+
+    now = datetime.now(timezone.utc)
+    with _JOBS_LOCK:
+        if len(_JOBS) >= _MAX_JOBS:
+            oldest = min(_JOBS.keys(), key=lambda k: _JOBS[k].get("created_at", datetime.min))
+            del _JOBS[oldest]
+        _JOBS[job_id] = {
+            "id": job_id, "status": "queued", "progress": 0,
+            "step_label": "排队中", "message": "快速体验已启动",
+            "log_lines": [], "result_path": None, "error": None,
+            "created_at": now,
+            "v1_filename": "天猫服务协议2015 (V1)",
+            "v2_filename": "天猫服务协议2026 (V2)",
+            "v1_path": str(upload_dir / "v1.pdf"),
+            "v2_path": str(upload_dir / "v2.pdf"),
+            "_event_queue": queue.Queue(maxsize=500),
+            "thorough": False,
+        }
+
+    try:
+        _executor.submit(_run_pipeline, job_id,
+                        str(upload_dir / "v1.pdf"),
+                        str(upload_dir / "v2.pdf"),
+                        False)
+        print(f"[DEMO] Job {job_id} started: one-click demo")
+    except Exception as exc:
+        print(f"[DEMO] Failed to start pipeline: {exc}")
 
     return RedirectResponse(url=f"/job/{job_id}", status_code=303)
 
