@@ -243,10 +243,11 @@
 
           <!-- Bottom bar: expand + confirm -->
           <div class="flex items-center justify-between pt-2 border-t border-slate-100">
-            {% if change.v1_snippet or change.v2_snippet %}
+            {% set show_expand = (change.v1_snippet or change.v2_snippet) and not (change.v1_snippet and change.v2_snippet and change.v1_snippet == change.v2_snippet) %}
+            {% if show_expand %}
             <button @click="expanded = !expanded"
                     class="text-xs text-slate-400 hover:text-brand-600 transition-colors font-medium"
-                    x-text="expanded ? '收起原文 ▲' : '展开全文 ▼'"></button>
+                    x-text="expanded ? '收起原文 ▲' : '展开原文 ▼'"></button>
             {% else %}
             <span></span>
             {% endif %}
